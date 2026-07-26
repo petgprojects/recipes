@@ -15,19 +15,21 @@ truth for what is done. This file is the orientation layer that neither covers.
 | Phase | State |
 |---|---|
 | 0 — Scaffold | ✅ done, verified from clean, committed `f138173` |
-| 1 — Deterministic ingestion | ◐ **nearly done** — live exit validation remains |
-| 2–7 | not started |
+| 1 — Deterministic ingestion | ✅ done, clean live exit verified |
+| 2 — LLM enrichment | **resume here** |
+| 3–7 | not started |
 
-Eight commits are on `main` through the operations surface. No remote is
-configured.
+Nine commits are on `main` through the Phase 1 completion checkpoint. No remote
+is configured.
 
-**Phase 1 remaining** (checklist in `PROGRESS.md`): clean live exit validation.
-Ingredient normalization, transactional recipe
-persistence, image caching, source seeding, scanner library, pg-boss/cron and
-`scan_runs` telemetry, and `/ops` are done and tested.
+**Phase 1 is complete.** A clean bootstrap inserted 425 real recipes with local
+image references, zero duplicate URLs and zero LLM involvement. Ingredient
+normalization, transactional persistence, image caching, source seeding,
+scanner library, pg-boss/cron, `scan_runs` telemetry and `/ops` are done.
 
 Everything currently passes: `corepack pnpm typecheck` clean across 4 projects,
-`corepack pnpm test` → **420 passing** (shared 35, db 19, worker 366).
+`corepack pnpm test` → **421 passing** (shared 35, db 19, worker 367), and the
+production web build passes.
 
 ---
 
@@ -150,11 +152,14 @@ Detail in `apps/worker/test/fixtures/COVERAGE.md`. The load-bearing bits:
 
 ## Suggested first move next session
 
-Resume Phase 1 part 2. Ingredient canonicalization is the substantial piece —
-PLAN.md §4 calls it "the real work," and it is what makes requirement 3 (one
-grocery list from many recipes) feel magic or broken. The three-stage matcher is
-specified there; stages 1–2 are deterministic and need no LLM, so all of Phase 1
-part 2 can be built and tested with no API key. Stage 3 is a Phase 2 concern.
+Resume Phase 2 with the direct OpenRouter client, strict structured outputs and
+mocked tests. Build the suitability gate and derived-field path before doing a
+real backfill. No agent loop or `emit_recipe` tool workaround: A2 records that
+the selected model supports strict `json_schema` output. An OpenRouter key is
+needed only for the first live call; implementation and tests can proceed
+without it.
 
-The 117 seeded ingredients each already have a self-alias row in
-`ingredient_aliases`, so exact-match hits work from the first run.
+Operational note: GypsyPlate's sitemap endpoints returned HTTP 403 during the
+clean exit run. Its latest run is deliberately `partial`, its checkpoint remains
+null, and the daily/manual scan will retry it. Do not hand-edit it to success or
+advance `last_scanned_at`.

@@ -186,6 +186,34 @@ describe('Phase 1 scan orchestration', () => {
     );
   });
 
+  it('keeps an empty warned discovery eligible for retry', async () => {
+    const finished = vi.fn<ScanOrchestrationDependencies['finishSourceScan']>();
+    const dependencies = baseDependencies({
+      finishSourceScan: finished,
+      async discover() {
+        return {
+          urls: [],
+          via: [],
+          feedUnchanged: false,
+          feedEtag: null,
+          feedLastModified: null,
+          warnings: ['sitemap https://example.com/sitemap.xml: HTTP 403'],
+        };
+      },
+    });
+
+    const summary = await createScanOrchestrator(dependencies).scanSource(SOURCE);
+
+    expect(summary.status).toBe('partial');
+    expect(summary.error).toContain('HTTP 403');
+    expect(finished).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'partial',
+        retryRequired: true,
+      }),
+    );
+  });
+
   it('finalizes telemetry before propagating a shutdown abort for pg-boss retry', async () => {
     const controller = new AbortController();
     const finished = vi.fn<ScanOrchestrationDependencies['finishSourceScan']>();

@@ -131,7 +131,7 @@ removes it structurally.
       ingredients, `dev@local` user, `/api/health`, `/api/recipes`.
       *Exit verified: `docker compose up` from clean → 5 extensions, 15 tables,
       117 ingredients + 117 self-aliases, health 200, `/api/recipes` → `[]`.*
-- [ ] **Phase 1 — Deterministic ingestion.** ◐ **IN PROGRESS — live exit validation remains.**
+- [x] **Phase 1 — Deterministic ingestion.** ✅ **COMPLETE.**
     - [x] Polite fetcher (robots.txt, crawl delay, conditional GET, backoff)
     - [x] RSS + sitemap discovery
     - [x] JSON-LD → Recipe extraction, 30 committed fixtures, coverage report
@@ -141,8 +141,9 @@ removes it structurally.
     - [x] pg-boss wiring, cron + advisory lock, `scan_runs` telemetry
     - [x] `sources` seeded (8 approved blogs, all enabled — A6, A7)
     - [x] `/ops` page: last run, counts, cost, manual queue control
-      *Exit: hundreds of real recipes with photos, zero LLM involvement.*
-- [ ] **Phase 2 — LLM enrichment.** OpenRouter client, suitability gate,
+      *Exit verified from a clean stack: 425 real recipes, every row with a
+      local image reference, 0 duplicate URLs, 0 tokens and $0 LLM cost.*
+- [ ] **Phase 2 — LLM enrichment.** ◐ **RESUME HERE.** OpenRouter client, suitability gate,
       derived fields, HTML + Reddit extraction, blurbs, budget cap, backfill.
       *Exit: recipes complete, junk filtered.*
 - [ ] **Phase 3 — UI port.** Components, images, TanStack Query auto-refresh,
@@ -255,8 +256,8 @@ failures are recorded as partial without repeatedly re-fetching the whole
 source. Feed `304` responses only skip discovery when stored recipes prove the
 source has been populated.
 
-Verification: the complete workspace has 420 passing tests (shared 35, db 19,
-worker 366), all workspace typechecks pass, the fixture coverage report passes,
+Verification: the complete workspace has 421 passing tests (shared 35, db 19,
+worker 367), all workspace typechecks pass, the fixture coverage report passes,
 database-backed lifecycle tests pass, duplicate queue sends coalesce, and a
 real worker startup/shutdown smoke test initialized pg-boss and cron then
 released both cleanly with bootstrap crawling disabled. Interrupted jobs
@@ -274,3 +275,27 @@ The shared queue's exclusive policy coalesces repeated manual requests. A live
 endpoint probe returned queued then coalesced, and the responsive page was
 checked at desktop and mobile widths with no page overflow or browser errors.
 The production Next.js build and all workspace typechecks pass.
+
+### 2026-07-26 — Phase 1 complete: clean live exit
+Recreated the project database, image and dependency volumes, rebuilt all
+services, and let the authorized deterministic bootstrap job finish across all
+eight enabled sources. It found and inserted 425 recipes, skipped 18 fetched
+pages with no Recipe node, and made zero LLM calls. All 425 recipe rows have a
+local image reference backed by 421 unique WebP files (four source images are
+legitimately shared), with zero duplicate source URLs.
+
+Per-source initial results: Budget Bytes 7, Downshiftology 200, Love & Lemons 9,
+Pinch of Yum 3, Serious Eats 193, Skinnytaste 7, The Kitchn 6. Serious Eats
+completed successfully, validating the enabled-source decision. GypsyPlate's
+two sitemap endpoints currently return HTTP 403, so it contributed zero rows;
+the run is visibly `partial`, retains a null checkpoint, and remains eligible
+for retry instead of silently advancing.
+
+The live run exposed and fixed two final lifecycle details: interrupted jobs
+finalize telemetry before pg-boss retry, and an empty discovery with warnings
+cannot advance a source checkpoint. A follow-up manual scan took 23 seconds,
+inserted zero duplicates, used conditional/incremental discovery for completed
+sources, and proved GypsyPlate's failed checkpoint remains null. Final checks:
+421 workspace tests pass, all typechecks pass, the production web build passes,
+Compose reports db/web healthy and worker running, `/api/health` reports Phase
+1 with 425 recipes, and `/ops` plus `/api/recipes` return HTTP 200.

@@ -159,6 +159,17 @@ export function createScanOrchestrator(
     try {
       discovery = await dependencies.discover(source);
       errors.push(...discovery.warnings);
+      // An unchanged conditional feed can legitimately produce no URLs. An
+      // empty discovery accompanied by fetch/parse warnings cannot: advancing
+      // its checkpoint would turn a transient WAF/upstream failure into a
+      // silent permanent skip.
+      if (
+        discovery.urls.length === 0 &&
+        discovery.warnings.length > 0 &&
+        !discovery.feedUnchanged
+      ) {
+        retryRequired = true;
+      }
     } catch (error) {
       const message = `discovery failed: ${errorMessage(error)}`;
       const finishedAt = dependencies.now();

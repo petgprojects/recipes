@@ -9,10 +9,9 @@
  *   200  → `select 1` succeeded AND the seeded `ingredients` table was counted.
  *   503  → anything failed, with the error message in the body.
  *
- * `ingredients` is the right table to count because it is the only thing Phase 0
- * seeds. A non-zero count proves migrate *and* seed both ran, which is exactly
- * what the exit criterion asks for. `recipes` is counted too, but its count is
- * expected to be 0 until Phase 1 crawls anything.
+ * `ingredients` is the right migration/seed sentinel because it is populated
+ * before the worker starts. `recipes` is counted too so Phase 1 crawl progress
+ * is visible without turning ingestion completeness into a liveness condition.
  */
 
 import { NextResponse } from 'next/server';
@@ -45,15 +44,14 @@ export async function GET() {
     return NextResponse.json(
       {
         status: seeded ? 'ok' : 'degraded',
-        phase: 0,
+        phase: 1,
         timestamp: new Date().toISOString(),
         database: {
           reachable: true,
           migrated: true,
           seeded,
           ingredients: ingredientCount,
-          // Expected to be 0 through Phase 0 — every recipe arrives from a
-          // Phase 1 crawl (PLAN.md §4).
+          // Every recipe arrives from the deterministic Phase 1 crawl.
           recipes: recipeRow?.count ?? 0,
           latencyMs: Date.now() - startedAt,
         },
@@ -69,7 +67,7 @@ export async function GET() {
     return NextResponse.json(
       {
         status: 'error',
-        phase: 0,
+        phase: 1,
         timestamp: new Date().toISOString(),
         database: {
           reachable: false,

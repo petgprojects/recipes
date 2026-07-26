@@ -16,6 +16,7 @@
     "@recipes/db": "workspace:*",
     "@recipes/shared": "workspace:*",
     "cheerio": "^1.1.2",
+    "drizzle-orm": "^0.45.2",
     "entities": "^7.0.0",
     "fast-xml-parser": "^5.3.1"
   },

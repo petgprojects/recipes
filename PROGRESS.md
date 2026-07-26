@@ -129,7 +129,7 @@ removes it structurally.
     - [x] Polite fetcher (robots.txt, crawl delay, conditional GET, backoff)
     - [x] RSS + sitemap discovery
     - [x] JSON-LD → Recipe extraction, 30 committed fixtures, coverage report
-    - [ ] Ingredient normalization (parse → match → alias writeback, stages 1–2)
+    - [x] Ingredient normalization (parse → match → alias writeback, stages 1–2)
     - [ ] Insert path + dedupe on `source_url` + `content_hash`
     - [ ] Image pipeline (fetch once, downscale ~800px, `recipe-images` volume)
     - [ ] pg-boss wiring, cron + advisory lock, `scan_runs` telemetry
@@ -202,3 +202,15 @@ Also: `author` is frequently a bare `@id` reference to a sibling `Person` node
 (Yoast sites). Dereferencing took author coverage from 17/21 to 21/21 — and
 `raw_jsonld` alone cannot re-derive it, since the referenced node lives outside
 the Recipe object.
+
+### 2026-07-26 — Phase 1, ingredient normalization
+Implemented deterministic parsing plus exact-first, conservative pg_trgm
+matching. Fuzzy matches must score above 0.78 and lead the nearest distinct
+ingredient by at least 0.08 before the spelling is written back to
+`ingredient_aliases`; ambiguous or unknown lines remain renderable with a null
+`ingredient_id` for Phase 2's semantic matcher.
+
+Verification: 47 focused parser/matcher tests, 345 worker tests and 383 tests
+workspace-wide pass; all workspace typechecks pass. A live Postgres probe
+confirmed both exact matching (`Chicken Breast`) and fuzzy alias learning
+(`Chicken Breasts` → `chicken breast`) against the seeded rows.

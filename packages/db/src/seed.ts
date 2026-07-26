@@ -21,7 +21,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sql } from 'drizzle-orm';
-import { CANONICAL_INGREDIENTS } from '@recipes/shared';
+import { CANONICAL_INGREDIENTS, ingredientAliasKey } from '@recipes/shared';
 import { createClient, type Database } from './client';
 import { ingredientAliases, ingredients, users } from './schema';
 
@@ -33,14 +33,8 @@ export interface SeedResult {
   devUser: boolean;
 }
 
-/**
- * The alias form of a canonical name. Kept deliberately dumb — lower-case and
- * whitespace-collapsed — because the matcher's exact-match stage must use the
- * identical transform, and anything cleverer here silently stops matching.
- */
-export function aliasKey(name: string): string {
-  return name.trim().toLowerCase().replace(/\s+/g, ' ');
-}
+/** @deprecated Import `ingredientAliasKey` from `@recipes/shared` instead. */
+export const aliasKey = ingredientAliasKey;
 
 export async function seed(db: Database, nodeEnv = process.env.NODE_ENV): Promise<SeedResult> {
   // De-duplicated by name: Postgres refuses an ON CONFLICT DO UPDATE that would

@@ -23,6 +23,17 @@ export interface SeedIngredient {
   readonly defaultUnit: string | null;
 }
 
+/**
+ * The storage key used by `ingredient_aliases.alias`.
+ *
+ * Both the seed and the runtime matcher call this exact helper. Keeping the
+ * deliberately small transform in one pure module prevents a future cleanup
+ * on either side from silently making seeded aliases impossible to match.
+ */
+export function ingredientAliasKey(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 /** Shape check used by the tests and available to the seeder. */
 export const seedIngredientSchema = z.object({
   name: z.string().trim().min(1),

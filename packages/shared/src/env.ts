@@ -36,6 +36,11 @@ const nonEmpty = z
     return trimmed === undefined || trimmed === '' ? undefined : trimmed;
   });
 
+const booleanString = z
+  .enum(['true', 'false'])
+  .default('true')
+  .transform((value) => value === 'true');
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
@@ -53,6 +58,17 @@ const envSchema = z.object({
   OPENROUTER_BASE_URL: z.url().default('https://openrouter.ai/api/v1'),
   OPENROUTER_MODEL: z.string().min(1).default('deepseek/deepseek-v4-flash'),
   LLM_DAILY_BUDGET_USD: z.coerce.number().positive().default(1.0),
+
+  // ── Phase 1 — deterministic scan worker ─────────────────────────────────
+  RECIPE_IMAGES_DIR: z.string().trim().min(1).default('./data/images'),
+  SCAN_CRON_SCHEDULE: z.string().trim().min(1).default('0 3 * * *'),
+  SCAN_CRON_TIMEZONE: z.string().trim().min(1).default('America/New_York'),
+  SCAN_DISCOVERY_LIMIT: z.coerce.number().int().positive().max(1_000).default(200),
+  /**
+   * A fresh database gets one scan immediately instead of waiting until 3am.
+   * Disable this for startup smoke tests or deliberately cron-only deployments.
+   */
+  SCAN_BOOTSTRAP_ENABLED: booleanString,
 
   // ── Phase 2 — Reddit ─────────────────────────────────────────────────────
   REDDIT_CLIENT_ID: nonEmpty,

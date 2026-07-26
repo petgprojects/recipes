@@ -154,10 +154,9 @@ services:
     # Restarts independently of web (PLAN.md §3) — a crashed scan must not take
     # the UI down, and vice versa.
     restart: unless-stopped
-    # The worker's SIGTERM handler closes the connection pool; give it room
-    # before docker escalates to SIGKILL. Phase 1 will want more here once a
-    # scan can be in flight.
-    stop_grace_period: 20s
+    # pg-boss gets up to 15s to drain/abort an in-flight handler before the
+    # shared database pool closes; give the full sequence room before SIGKILL.
+    stop_grace_period: 30s
     volumes:
       - .:/app
       - /app/node_modules

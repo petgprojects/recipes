@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { eq } from '@recipes/db/operators';
 import { recipeIngredients, recipes, sources } from '@recipes/db/schema';
 import type { Database } from '@recipes/db/client';
 import type { RecipeDraft } from '../src/scanner/jsonld';

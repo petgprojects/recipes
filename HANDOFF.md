@@ -15,18 +15,19 @@ truth for what is done. This file is the orientation layer that neither covers.
 | Phase | State |
 |---|---|
 | 0 — Scaffold | ✅ done, verified from clean, committed `f138173` |
-| 1 — Deterministic ingestion | ◐ **half done**, committed `866e224` — resume here |
+| 1 — Deterministic ingestion | ◐ **nearly done** — `/ops` + live exit validation remain |
 | 2–7 | not started |
 
-Three commits, all on `main`. No remote configured. Working tree clean.
+Six commits are on `main` through the storage stage; scan orchestration is the
+current checkpoint. No remote is configured.
 
-**Phase 1 remaining** (checklist in `PROGRESS.md`): pg-boss + cron, scan
-orchestration/`scan_runs` telemetry, and the `/ops` page. Ingredient
-normalization, transactional recipe persistence, image caching, source seeding,
-and the scanner library layer are done and tested.
+**Phase 1 remaining** (checklist in `PROGRESS.md`): the `/ops` page and clean
+live exit validation. Ingredient normalization, transactional recipe
+persistence, image caching, source seeding, scanner library, pg-boss/cron and
+`scan_runs` telemetry are done and tested.
 
 Everything currently passes: `corepack pnpm typecheck` clean across 4 projects,
-`corepack pnpm test` → **405 passing** (shared 33, db 19, worker 353).
+`corepack pnpm test` → **419 passing** (shared 35, db 19, worker 365).
 
 ---
 

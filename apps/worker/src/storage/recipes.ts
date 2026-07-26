@@ -7,7 +7,7 @@
  * replaces the deterministic recipe fields and all ingredient rows atomically.
  */
 
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql } from '@recipes/db/operators';
 import {
   recipeIngredients,
   recipes,

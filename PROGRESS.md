@@ -131,14 +131,14 @@ removes it structurally.
       ingredients, `dev@local` user, `/api/health`, `/api/recipes`.
       *Exit verified: `docker compose up` from clean → 5 extensions, 15 tables,
       117 ingredients + 117 self-aliases, health 200, `/api/recipes` → `[]`.*
-- [ ] **Phase 1 — Deterministic ingestion.** ◐ **IN PROGRESS — resume here.**
+- [ ] **Phase 1 — Deterministic ingestion.** ◐ **IN PROGRESS — `/ops` + live exit validation remain.**
     - [x] Polite fetcher (robots.txt, crawl delay, conditional GET, backoff)
     - [x] RSS + sitemap discovery
     - [x] JSON-LD → Recipe extraction, 30 committed fixtures, coverage report
     - [x] Ingredient normalization (parse → match → alias writeback, stages 1–2)
     - [x] Insert path + dedupe on `source_url` + `content_hash`
     - [x] Image pipeline (fetch once, downscale ~800px, `recipe-images` volume)
-    - [ ] pg-boss wiring, cron + advisory lock, `scan_runs` telemetry
+    - [x] pg-boss wiring, cron + advisory lock, `scan_runs` telemetry
     - [x] `sources` seeded (8 approved blogs, all enabled — A6, A7)
     - [ ] `/ops` page: last run, counts, cost
       *Exit: hundreds of real recipes with photos, zero LLM involvement.*
@@ -240,3 +240,23 @@ contains 8/8 enabled sources and no Classpop row. Live integration tests cover
 insert, unchanged touch, changed-content replacement, rollback and 304
 semantics. Workspace totals: shared 33, db 19 and worker 353 tests passing;
 typecheck and the 26-page fixture coverage report pass.
+
+### 2026-07-26 — Phase 1, scan orchestration + scheduling
+Wired the deterministic scanner into a coalescing pg-boss queue, a daily
+`03:00 America/New_York` node-cron trigger, a one-time fresh-database bootstrap,
+and a session-scoped Postgres advisory lock. The job retries transient failures
+twice with bounded exponential backoff, expires after six hours, emits
+per-source `scan_runs` counters/status/errors, and shuts down cooperatively.
+
+Source checkpoints now distinguish errors that require a retry from useful
+partial runs: page-fetch/extraction failures retain the prior validators so
+they can be retried, while harmless feed fallback warnings and image-cache
+failures are recorded as partial without repeatedly re-fetching the whole
+source. Feed `304` responses only skip discovery when stored recipes prove the
+source has been populated.
+
+Verification: the complete workspace has 419 passing tests (shared 35, db 19,
+worker 365), all workspace typechecks pass, the fixture coverage report passes,
+database-backed lifecycle tests pass, duplicate queue sends coalesce, and a
+real worker startup/shutdown smoke test initialized pg-boss and cron then
+released both cleanly with bootstrap crawling disabled.

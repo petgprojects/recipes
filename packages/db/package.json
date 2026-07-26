@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema.ts",
+    "./operators": "./src/operators.ts",
     "./client": "./src/client.ts",
     "./migrate": "./src/migrate.ts",
     "./seed": "./src/seed.ts"

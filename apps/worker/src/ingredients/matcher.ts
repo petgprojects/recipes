@@ -6,7 +6,7 @@
  * one false-positive alias write poisons every future match for that spelling.
  */
 
-import { asc, desc, eq, gt, sql } from 'drizzle-orm';
+import { asc, desc, eq, gt, sql } from '@recipes/db/operators';
 import { ingredientAliasKey } from '@recipes/shared';
 import { ingredientAliases, ingredients } from '@recipes/db/schema';
 import type { Database } from '@recipes/db/client';

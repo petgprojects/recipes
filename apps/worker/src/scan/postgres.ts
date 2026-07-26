@@ -28,6 +28,7 @@ import {
 import {
   createScanOrchestrator,
   type FinishSourceScanInput,
+  type ScanOrchestrationDependencies,
   type ScanOrchestrator,
   type ScannableSource,
 } from './orchestrator';
@@ -39,6 +40,7 @@ export interface CreatePostgresScanOrchestratorOptions {
   readonly fetcher?: PoliteFetcher;
   readonly now?: () => Date;
   readonly log?: (message: string) => void;
+  readonly htmlFallback?: ScanOrchestrationDependencies['htmlFallback'];
 }
 
 export function createPostgresScanOrchestrator(
@@ -147,6 +149,10 @@ export function createPostgresScanOrchestrator(
         : toRecipeDraft(result.recipe, sourceUrl, fallback);
     },
 
+    ...(options.htmlFallback === undefined
+      ? {}
+      : { htmlFallback: options.htmlFallback }),
+
     normalizeIngredients(lines) {
       return normalizeIngredientLines(lines, matcher);
     },
@@ -226,9 +232,14 @@ async function finishSourceScan(
         found: input.found,
         newCount: input.newCount,
         noRecipeCount: input.noRecipeCount,
-        tokensIn: 0,
-        tokensOut: 0,
-        costUsd: 0,
+        // Paid fallbacks record provider usage immediately, before parsing or
+        // persistence. If a later step throws, the in-memory scan counters do
+        // not see that response; never let finalization erase the durable
+        // increment. `greatest` also preserves the ordinary successful path,
+        // where both values describe the same cumulative usage.
+        tokensIn: sql`greatest(${scanRuns.tokensIn}, ${input.tokensIn})`,
+        tokensOut: sql`greatest(${scanRuns.tokensOut}, ${input.tokensOut})`,
+        costUsd: sql`greatest(${scanRuns.costUsd}, ${input.costUsd})`,
         error: input.error,
       })
       .where(eq(scanRuns.id, input.runId));

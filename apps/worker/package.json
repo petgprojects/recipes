@@ -19,8 +19,10 @@
     "entities": "^7.0.0",
     "fast-xml-parser": "^5.3.1",
     "node-cron": "4.6.0",
+    "openai": "^6.49.0",
     "pg-boss": "12.26.3",
-    "sharp": "^0.35.3"
+    "sharp": "^0.35.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

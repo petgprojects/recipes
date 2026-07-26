@@ -14,7 +14,14 @@
  */
 
 import { z } from 'zod';
-import { CATEGORIES, RECIPE_STATUS, SOURCE_KIND, TAGS, RATING_ASPECTS } from './vocab';
+import {
+  AISLES,
+  CATEGORIES,
+  RECIPE_STATUS,
+  SOURCE_KIND,
+  TAGS,
+  RATING_ASPECTS,
+} from './vocab';
 import { CANONICAL_UNITS } from './units';
 
 // ── Primitives ──────────────────────────────────────────────────────────────
@@ -161,17 +168,189 @@ export type Recipe = z.infer<typeof recipeSchema>;
 
 /** `classifySuitability(recipe)` — runs before insert (PLAN.md §5, Phase 2). */
 export const suitabilitySchema = z.object({
-  is_meal_prep: z.boolean(),
-  reason: z.string().trim().min(1).max(400),
+  is_meal_prep: z
+    .boolean()
+    .describe('Whether this recipe works as practical make-ahead meal prep.'),
+  reason: z
+    .string()
+    .trim()
+    .min(1)
+    .max(400)
+    .describe('A concise, factual explanation of the classification.'),
 });
 
 /** `deriveFields(recipe)` — the fields schema.org cannot give us (§1). */
 export const derivedFieldsSchema = z.object({
-  keeps_days: z.number().int().nonnegative().max(60).nullable(),
-  freezer_months: z.number().int().nonnegative().max(24).nullable(),
-  category: categorySchema,
-  tags: z.array(tagSchema).max(6),
+  keeps_days: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(60)
+    .nullable()
+    .describe('Conservative refrigerator shelf life in days, or null when uncertain.'),
+  freezer_months: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(24)
+    .nullable()
+    .describe('Conservative freezer shelf life in months, or null when unsuitable or uncertain.'),
+  category: categorySchema.describe('Exactly one category from the controlled vocabulary.'),
+  tags: z
+    .array(tagSchema)
+    .max(6)
+    .describe('Up to six distinct tags from the controlled vocabulary.'),
+}).superRefine((value, context) => {
+  if (new Set(value.tags).size !== value.tags.length) {
+    context.addIssue({
+      code: 'custom',
+      path: ['tags'],
+      message: 'tags must not contain duplicates',
+    });
+  }
 });
+
+/**
+ * `writeBlurb(recipe)` returns an object rather than a bare string so it can
+ * use strict JSON Schema structured output like every other Phase 2 task.
+ */
+export const blurbOutputSchema = z.object({
+  blurb: z
+    .string()
+    .trim()
+    .min(1)
+    .max(280)
+    .describe('An original, factual one-sentence meal-prep blurb.'),
+});
+
+/**
+ * LLM-only instruction shape. Unlike `instructionStepSchema`, it deliberately
+ * has no default: strict structured-output schemas require every property to
+ * be explicit, with null representing an absent heading.
+ */
+export const llmInstructionStepSchema = z.object({
+  name: z.string().trim().min(1).max(200).nullable(),
+  text: z.string().trim().min(1).max(4_000),
+});
+
+/**
+ * Factual recipe fields an LLM may extract from visible page/post text.
+ *
+ * Provenance, source URL, slug and content hash are intentionally absent.
+ * Callers derive those locally so untrusted text can never make the model
+ * redirect attribution or choose a dedupe key.
+ */
+export const llmExtractedRecipeSchema = z.object({
+  title: z.string().trim().min(1).max(300),
+  total_minutes: z.number().int().positive().max(60 * 24 * 14).nullable(),
+  active_minutes: z.number().int().positive().max(60 * 24 * 14).nullable(),
+  servings: z.number().int().positive().max(200).nullable(),
+  ingredients: z
+    .array(z.string().trim().min(1).max(1_000))
+    .min(1)
+    .max(200),
+  instructions: z.array(llmInstructionStepSchema).max(200),
+  image_url: z.url().nullable(),
+  author: z.string().trim().min(1).max(200).nullable(),
+  published_at: z.iso.datetime({ offset: true }).nullable(),
+});
+
+/**
+ * A page or post may legitimately contain no complete recipe. Keeping that as
+ * a validated result avoids turning ordinary round-up/editorial content into
+ * an exception or a fabricated recipe.
+ */
+export const llmRecipeExtractionResultSchema = z
+  .object({
+    found: z.boolean(),
+    reason: z.string().trim().min(1).max(400),
+    recipe: llmExtractedRecipeSchema.nullable(),
+  })
+  .superRefine((value, context) => {
+    if (value.found !== (value.recipe !== null)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['recipe'],
+        message: value.found
+          ? 'recipe must be present when found is true'
+          : 'recipe must be null when found is false',
+      });
+    }
+  });
+
+/**
+ * Canonical ingredient names contain only the ingredient identity — no amount,
+ * unit, preparation note, HTML, control characters, or surrounding whitespace.
+ * Lowercase storage keys make exact comparisons deterministic.
+ */
+export const normalizedIngredientNameSchema = z
+  .string()
+  .min(1)
+  .max(120)
+  .refine((value) => value === value.trim(), 'ingredient name must not have surrounding whitespace')
+  .refine(
+    (value) => value === value.toLocaleLowerCase('en-US'),
+    'ingredient name must be lowercase',
+  )
+  .regex(
+    /^\p{L}+(?:[ &'’.-]\p{L}+)*$/u,
+    'ingredient name may contain only words and name punctuation',
+  )
+  .refine(
+    (value) =>
+      !/\b(?:as needed|divided|for garnish|for serving|optional|plus more|to taste)\b/u.test(
+        value,
+      ),
+    'ingredient name must not contain a quantity or preparation note',
+  );
+
+export const canonicalIngredientSummarySchema = z
+  .object({
+    name: normalizedIngredientNameSchema,
+    aisle: z.enum(AISLES),
+  })
+  .strict();
+
+const ingredientMappingExistingDecisionSchema = z
+  .object({
+    input_name: normalizedIngredientNameSchema,
+    action: z.literal('existing'),
+    canonical_name: normalizedIngredientNameSchema,
+    aisle: z.null(),
+  })
+  .strict();
+
+const ingredientMappingNewDecisionSchema = z
+  .object({
+    input_name: normalizedIngredientNameSchema,
+    action: z.literal('new'),
+    canonical_name: normalizedIngredientNameSchema,
+    aisle: z.enum(AISLES),
+  })
+  .strict();
+
+/** One semantic decision for one previously-unmatched normalized input name. */
+export const ingredientMappingDecisionSchema = z.discriminatedUnion('action', [
+  ingredientMappingExistingDecisionSchema,
+  ingredientMappingNewDecisionSchema,
+]);
+
+/**
+ * Structural strict-output contract. `mapIngredients()` adds input-aware
+ * validation for exact batch coverage and existing-target membership.
+ */
+export const ingredientMappingOutputSchema = z
+  .object({
+    decisions: z.array(ingredientMappingDecisionSchema).min(1).max(40),
+  })
+  .strict();
 
 export type Suitability = z.infer<typeof suitabilitySchema>;
 export type DerivedFields = z.infer<typeof derivedFieldsSchema>;
+export type BlurbOutput = z.infer<typeof blurbOutputSchema>;
+export type LlmInstructionStep = z.infer<typeof llmInstructionStepSchema>;
+export type LlmExtractedRecipe = z.infer<typeof llmExtractedRecipeSchema>;
+export type LlmRecipeExtractionResult = z.infer<typeof llmRecipeExtractionResultSchema>;
+export type CanonicalIngredientSummary = z.infer<typeof canonicalIngredientSummarySchema>;
+export type IngredientMappingDecision = z.infer<typeof ingredientMappingDecisionSchema>;
+export type IngredientMappingOutput = z.infer<typeof ingredientMappingOutputSchema>;

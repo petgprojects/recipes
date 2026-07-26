@@ -16,15 +16,19 @@
  *                           finds an upstream edit bumps `last_seen_at` and the
  *                           poller should see the change.
  *   ?limit=<1..200>         page size, default 50.
- *   ?status=<...|all>       defaults to everything except `rejected`, so the
- *                           junk the Phase 2 suitability gate throws away stays
- *                           in the database (auditable) but out of the feed.
+ *   ?status=<...|all>       defaults to `active`. Pending rows are durable
+ *                           Phase 2 work, not browse-ready recipes; rejected
+ *                           rows stay auditable without entering the feed.
+ *
+ * The response deliberately omits `raw_jsonld`, HTTP validators and the
+ * content hash. Those are internal crawl/re-enrichment inputs and can contain
+ * source prose; browse clients receive our fields and attribution only.
  *
  * A bad parameter is a 400 with a reason rather than a silently ignored filter.
  */
 
 import { NextResponse } from 'next/server';
-import { and, db, desc, eq, gt, ne, recipes } from '@recipes/db';
+import { and, db, desc, eq, gt, recipes } from '@recipes/db';
 import { RECIPE_STATUS, type RecipeStatus } from '@recipes/shared';
 
 export const runtime = 'nodejs';
@@ -65,7 +69,7 @@ export async function GET(request: Request) {
 
   // ── status ───────────────────────────────────────────────────────────────
   const statusRaw = params.get('status');
-  let statusFilter: ReturnType<typeof ne> | undefined = ne(recipes.status, 'rejected');
+  let statusFilter: ReturnType<typeof eq> | undefined = eq(recipes.status, 'active');
   if (statusRaw !== null && statusRaw !== '') {
     if (statusRaw === 'all') {
       statusFilter = undefined;
@@ -80,7 +84,35 @@ export async function GET(request: Request) {
 
   try {
     const rows = await db
-      .select()
+      .select({
+        id: recipes.id,
+        sourceId: recipes.sourceId,
+        sourceUrl: recipes.sourceUrl,
+        title: recipes.title,
+        slug: recipes.slug,
+        blurb: recipes.blurb,
+        totalMinutes: recipes.totalMinutes,
+        activeMinutes: recipes.activeMinutes,
+        servings: recipes.servings,
+        keepsDays: recipes.keepsDays,
+        freezerMonths: recipes.freezerMonths,
+        category: recipes.category,
+        tags: recipes.tags,
+        imageUrl: recipes.imageUrl,
+        imageLocalPath: recipes.imageLocalPath,
+        imageW: recipes.imageW,
+        imageH: recipes.imageH,
+        imageBlurhash: recipes.imageBlurhash,
+        author: recipes.author,
+        sourceRating: recipes.sourceRating,
+        sourceRatingCount: recipes.sourceRatingCount,
+        instructions: recipes.instructions,
+        status: recipes.status,
+        rejectionReason: recipes.rejectionReason,
+        publishedAt: recipes.publishedAt,
+        firstSeenAt: recipes.firstSeenAt,
+        lastSeenAt: recipes.lastSeenAt,
+      })
       .from(recipes)
       .where(and(statusFilter, since ? gt(recipes.lastSeenAt, since) : undefined))
       .orderBy(desc(recipes.lastSeenAt))

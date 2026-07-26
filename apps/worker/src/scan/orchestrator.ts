@@ -31,10 +31,9 @@ export interface SourceScanCounters {
   readonly found: number;
   readonly newCount: number;
   readonly noRecipeCount: number;
-  /** Phase 1 never calls an LLM; these values are deliberately invariant. */
-  readonly tokensIn: 0;
-  readonly tokensOut: 0;
-  readonly costUsd: 0;
+  readonly tokensIn: number;
+  readonly tokensOut: number;
+  readonly costUsd: number;
 }
 
 export interface SourceScanSummary extends SourceScanCounters {
@@ -75,6 +74,43 @@ export interface FinishSourceScanInput extends SourceScanCounters {
   readonly discovery: DiscoverResult | null;
 }
 
+export interface ScanLlmUsageIncrement {
+  readonly tokensIn: number;
+  readonly tokensOut: number;
+  readonly costUsd: number;
+}
+
+/**
+ * A guarded fallback owns the deterministic HTML eligibility decision as well
+ * as the optional paid extraction. `skip` is the zero-token structural path;
+ * paid negative decisions are intentionally separate from `no_recipe`.
+ */
+export type HtmlFallbackResult =
+  | {
+      readonly outcome: 'skip';
+      readonly reason: string;
+    }
+  | {
+      readonly outcome: 'not-recipe';
+      readonly reason: string;
+      readonly usage: ScanLlmUsageIncrement;
+    }
+  | {
+      readonly outcome: 'recipe';
+      readonly draft: RecipeDraft;
+      readonly usage: ScanLlmUsageIncrement;
+    };
+
+export interface HtmlFallbackInput {
+  readonly runId: string;
+  readonly html: string;
+  readonly pageUrl: string;
+  readonly extraction: ExtractionResult;
+  readonly publishedAt: Date | null;
+  readonly title: string | null;
+  readonly signal?: AbortSignal;
+}
+
 export interface ScanOrchestrationDependencies {
   readonly now: () => Date;
   readonly loadEnabledSources: () => Promise<readonly ScannableSource[]>;
@@ -96,6 +132,13 @@ export interface ScanOrchestrationDependencies {
     sourceUrl: string,
     fallback: { publishedAt?: Date | null; title?: string | null },
   ) => RecipeDraft | null;
+  /**
+   * Optional Phase 2 seam. When absent, the Phase 1 no-Recipe and incomplete
+   * JSON-LD behavior is unchanged.
+   */
+  readonly htmlFallback?: (
+    input: HtmlFallbackInput,
+  ) => Promise<HtmlFallbackResult>;
   readonly normalizeIngredients: (
     lines: readonly string[],
   ) => Promise<readonly RecipeIngredient[]>;
@@ -128,11 +171,6 @@ export interface ScanOrchestrator {
   scanSource(source: ScannableSource, options?: ScanAllOptions): Promise<SourceScanSummary>;
 }
 
-const ZERO_LLM = {
-  tokensIn: 0,
-  tokensOut: 0,
-  costUsd: 0,
-} as const;
 const MAX_ERROR_LENGTH = 12_000;
 
 /**
@@ -153,6 +191,9 @@ export function createScanOrchestrator(
     let found = 0;
     let newCount = 0;
     let noRecipeCount = 0;
+    let tokensIn = 0;
+    let tokensOut = 0;
+    let costUsd = 0;
     let retryRequired = false;
     let discovery: DiscoverResult;
 
@@ -183,7 +224,9 @@ export function createScanOrchestrator(
         found,
         newCount,
         noRecipeCount,
-        ...ZERO_LLM,
+        tokensIn,
+        tokensOut,
+        costUsd,
         error: message,
         discovery: null,
       });
@@ -196,7 +239,9 @@ export function createScanOrchestrator(
         found,
         newCount,
         noRecipeCount,
-        ...ZERO_LLM,
+        tokensIn,
+        tokensOut,
+        costUsd,
         error: message,
       };
     }
@@ -220,7 +265,9 @@ export function createScanOrchestrator(
         found,
         newCount,
         noRecipeCount,
-        ...ZERO_LLM,
+        tokensIn,
+        tokensOut,
+        costUsd,
         error: message,
         discovery: null,
       });
@@ -233,7 +280,9 @@ export function createScanOrchestrator(
         found,
         newCount,
         noRecipeCount,
-        ...ZERO_LLM,
+        tokensIn,
+        tokensOut,
+        costUsd,
         error: message,
       };
     }
@@ -278,20 +327,54 @@ export function createScanOrchestrator(
           }
 
           const extraction = dependencies.extract(page.body, page.finalUrl);
-          if (!extraction.found || extraction.recipe === null) {
-            noRecipeCount += 1;
-            continue;
-          }
-          found += 1;
+          const deterministicFound =
+            extraction.found && extraction.recipe !== null;
+          if (deterministicFound) found += 1;
 
-          const draft = dependencies.toDraft(extraction, page.finalUrl, {
-            publishedAt: item.publishedAt ?? null,
-            title: item.title ?? null,
-          });
+          let draft = deterministicFound
+            ? dependencies.toDraft(extraction, page.finalUrl, {
+                publishedAt: item.publishedAt ?? null,
+                title: item.title ?? null,
+              })
+            : null;
+
           if (draft === null) {
-            retryRequired = true;
-            errors.push(`page ${item.url}: Recipe JSON-LD had no insertable title/ingredients`);
-            continue;
+            if (dependencies.htmlFallback === undefined) {
+              // Preserve the verified Phase 1 behavior exactly when the
+              // optional Phase 2 seam is not installed.
+              if (!deterministicFound) {
+                noRecipeCount += 1;
+              } else {
+                retryRequired = true;
+                errors.push(
+                  `page ${item.url}: Recipe JSON-LD had no insertable title/ingredients`,
+                );
+              }
+              continue;
+            }
+
+            const fallback = await dependencies.htmlFallback({
+              runId,
+              html: page.body,
+              pageUrl: page.finalUrl,
+              extraction,
+              publishedAt: item.publishedAt ?? null,
+              title: item.title ?? null,
+              signal: options.signal,
+            });
+            if (fallback.outcome === 'skip') {
+              noRecipeCount += 1;
+              continue;
+            }
+
+            assertUsage(fallback.usage);
+            tokensIn += fallback.usage.tokensIn;
+            tokensOut += fallback.usage.tokensOut;
+            costUsd += fallback.usage.costUsd;
+            if (fallback.outcome === 'not-recipe') continue;
+
+            draft = fallback.draft;
+            if (!deterministicFound) found += 1;
           }
 
           const ingredients = await dependencies.normalizeIngredients(
@@ -342,7 +425,9 @@ export function createScanOrchestrator(
       found,
       newCount,
       noRecipeCount,
-      ...ZERO_LLM,
+      tokensIn,
+      tokensOut,
+      costUsd,
       error,
       discovery,
     });
@@ -358,7 +443,9 @@ export function createScanOrchestrator(
       found,
       newCount,
       noRecipeCount,
-      ...ZERO_LLM,
+      tokensIn,
+      tokensOut,
+      costUsd,
       error,
     };
     // Rejecting keeps pg-boss's retry semantics intact. The telemetry write
@@ -413,6 +500,18 @@ function joinedErrors(errors: readonly string[]): string | null {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function assertUsage(usage: ScanLlmUsageIncrement): void {
+  if (!Number.isSafeInteger(usage.tokensIn) || usage.tokensIn < 0) {
+    throw new TypeError('tokensIn must be a non-negative safe integer');
+  }
+  if (!Number.isSafeInteger(usage.tokensOut) || usage.tokensOut < 0) {
+    throw new TypeError('tokensOut must be a non-negative safe integer');
+  }
+  if (!Number.isFinite(usage.costUsd) || usage.costUsd < 0) {
+    throw new TypeError('costUsd must be a non-negative finite number');
+  }
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

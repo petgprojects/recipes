@@ -1,0 +1,43 @@
+[
+  {
+    "kind": "Listing",
+    "data": { "children": [] }
+  },
+  {
+    "kind": "Listing",
+    "data": {
+      "children": [
+        {
+          "kind": "t1",
+          "data": {
+            "id": "good",
+            "author": "helpful_cook",
+            "body": "Simmer the lentils for twenty minutes, then portion them.",
+            "score": 31,
+            "replies": ""
+          }
+        },
+        {
+          "kind": "t1",
+          "data": {
+            "id": "auto",
+            "author": "AutoModerator",
+            "body": "Remember the rules.",
+            "score": 100,
+            "replies": ""
+          }
+        },
+        {
+          "kind": "t1",
+          "data": {
+            "id": "gone",
+            "author": null,
+            "body": "[deleted]",
+            "score": 1,
+            "replies": ""
+          }
+        }
+      ]
+    }
+  }
+]

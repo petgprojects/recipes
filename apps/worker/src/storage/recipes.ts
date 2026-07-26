@@ -136,6 +136,16 @@ export async function persistRecipeDraft(
         sourceRatingCount: input.draft.sourceRatingCount,
         instructions: input.draft.instructions,
         rawJsonld: input.draft.rawJsonld,
+        // The LLM decision was made against the previous deterministic
+        // content. A changed recipe must pass through every Phase 2 task again
+        // rather than retaining stale presentation fields or a stale reject.
+        blurb: null,
+        keepsDays: null,
+        freezerMonths: null,
+        category: null,
+        tags: [],
+        status: 'pending',
+        rejectionReason: null,
         publishedAt: input.draft.publishedAt,
         lastSeenAt: seenAt,
       })

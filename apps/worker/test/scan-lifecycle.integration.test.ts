@@ -6,7 +6,9 @@ import type { Database } from '@recipes/db/client';
 import { ensureScanQueue, SCAN_QUEUE_OPTIONS } from '../src/jobs/queue';
 import { withScanAdvisoryLock } from '../src/jobs/advisory-lock';
 import { createPostgresScanOrchestrator } from '../src/scan/postgres';
+import { recordLlmUsage } from '../src/enrichment/postgres';
 import { PoliteFetcher } from '../src/scanner/fetcher';
+import type { RecipeDraft } from '../src/scanner/jsonld';
 import type { ScannableSource } from '../src/scan/orchestrator';
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -15,6 +17,10 @@ const TEST_PAGE =
   'https://www.budgetbytes.com/__phase-1-scan-lifecycle-integration__/';
 const CANONICAL_TEST_PAGE =
   'https://budgetbytes.com/__phase-1-scan-lifecycle-integration__';
+const FALLBACK_TEST_PAGE =
+  'https://www.budgetbytes.com/__phase-2-html-fallback-integration__/';
+const CANONICAL_FALLBACK_TEST_PAGE =
+  'https://budgetbytes.com/__phase-2-html-fallback-integration__';
 
 let db: Database;
 let sqlClient: Awaited<
@@ -59,11 +65,17 @@ integration('Phase 1 queue, lock and telemetry', () => {
       lastScannedAt: row.lastScannedAt,
     };
     await db.delete(recipes).where(eq(recipes.sourceUrl, CANONICAL_TEST_PAGE));
+    await db
+      .delete(recipes)
+      .where(eq(recipes.sourceUrl, CANONICAL_FALLBACK_TEST_PAGE));
   });
 
   afterAll(async () => {
     if (db) {
       await db.delete(recipes).where(eq(recipes.sourceUrl, CANONICAL_TEST_PAGE));
+      await db
+        .delete(recipes)
+        .where(eq(recipes.sourceUrl, CANONICAL_FALLBACK_TEST_PAGE));
       for (const runId of createdRunIds) {
         await db.delete(scanRuns).where(eq(scanRuns.id, runId));
       }
@@ -214,6 +226,105 @@ integration('Phase 1 queue, lock and telemetry', () => {
       lastScannedAt: successfulBoundary,
     });
   });
+
+  it('persists paid HTML-fallback usage into the source scan row', async () => {
+    const scanner = createPostgresScanOrchestrator({
+      db,
+      fetcher: new PoliteFetcher({
+        respectRobots: false,
+        sleep: async () => undefined,
+        fetchImpl: fakeFallbackSourceFetch,
+      }),
+      imageOutputDir: '/tmp/recipes-scan-lifecycle-images',
+      discoveryLimit: 10,
+      now: advancingClock(),
+      async htmlFallback(input) {
+        expect(input.extraction.found).toBe(false);
+        return {
+          outcome: 'recipe',
+          draft: fallbackDraft(input.pageUrl),
+          usage: {
+            tokensIn: 321,
+            tokensOut: 45,
+            costUsd: 0.000456,
+          },
+        };
+      },
+    });
+
+    const summary = await scanner.scanSource(source);
+    createdRunIds.push(summary.runId);
+
+    expect(summary).toMatchObject({
+      status: 'success',
+      found: 1,
+      newCount: 1,
+      noRecipeCount: 0,
+      tokensIn: 321,
+      tokensOut: 45,
+      costUsd: 0.000456,
+    });
+
+    const [run] = await db
+      .select()
+      .from(scanRuns)
+      .where(eq(scanRuns.id, summary.runId));
+    expect(run).toMatchObject({
+      status: 'success',
+      tokensIn: 321,
+      tokensOut: 45,
+      costUsd: 0.000456,
+    });
+  });
+
+  it('does not erase durable fallback usage when paid extraction later throws', async () => {
+    const scanner = createPostgresScanOrchestrator({
+      db,
+      fetcher: new PoliteFetcher({
+        respectRobots: false,
+        sleep: async () => undefined,
+        fetchImpl: fakeFallbackSourceFetch,
+      }),
+      imageOutputDir: '/tmp/recipes-scan-lifecycle-images',
+      discoveryLimit: 10,
+      now: advancingClock(),
+      async htmlFallback(input) {
+        await recordLlmUsage(db, input.runId, {
+          tokensIn: 654,
+          tokensOut: 32,
+          costUsd: 0.000789,
+        });
+        throw new Error('malformed paid fallback response');
+      },
+    });
+
+    const summary = await scanner.scanSource(source);
+    createdRunIds.push(summary.runId);
+
+    expect(summary).toMatchObject({
+      status: 'partial',
+      tokensIn: 0,
+      tokensOut: 0,
+      costUsd: 0,
+    });
+    expect(summary.error).toContain('malformed paid fallback response');
+
+    const [run] = await db
+      .select({
+        status: scanRuns.status,
+        tokensIn: scanRuns.tokensIn,
+        tokensOut: scanRuns.tokensOut,
+        costUsd: scanRuns.costUsd,
+      })
+      .from(scanRuns)
+      .where(eq(scanRuns.id, summary.runId));
+    expect(run).toEqual({
+      status: 'partial',
+      tokensIn: 654,
+      tokensOut: 32,
+      costUsd: 0.000789,
+    });
+  });
 });
 
 const fakeSourceFetch: typeof fetch = async (input) => {
@@ -278,6 +389,54 @@ const fakeFailingPageFetch: typeof fetch = async (input, init) => {
   }
   return new Response('not found', { status: 404 });
 };
+
+const fakeFallbackSourceFetch: typeof fetch = async (input) => {
+  const url =
+    typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : input.url;
+  if (url.includes('/feed')) {
+    return new Response(
+      `<?xml version="1.0"?>
+       <rss version="2.0"><channel><item>
+         <title>Fallback integration recipe</title>
+         <link>${FALLBACK_TEST_PAGE}</link>
+         <pubDate>Sun, 26 Jul 2099 08:00:00 GMT</pubDate>
+       </item></channel></rss>`,
+      { status: 200, headers: { 'content-type': 'application/rss+xml' } },
+    );
+  }
+  if (url.includes('__phase-2-html-fallback-integration__')) {
+    return new Response(
+      '<html><body><article><h1>Fallback Recipe</h1><p>Visible recipe text.</p></article></body></html>',
+      { status: 200, headers: { 'content-type': 'text/html' } },
+    );
+  }
+  return new Response('not found', { status: 404 });
+};
+
+function fallbackDraft(sourceUrl: string): RecipeDraft {
+  return {
+    sourceUrl,
+    contentHash: 'fallback-content-hash',
+    title: 'Fallback Integration Recipe',
+    slug: 'fallback-integration-recipe',
+    totalMinutes: 30,
+    activeMinutes: 10,
+    servings: 4,
+    imageUrl: null,
+    author: null,
+    sourceRating: null,
+    sourceRatingCount: null,
+    instructions: [{ name: null, text: 'Cook the onion.' }],
+    rawJsonld: null,
+    publishedAt: new Date('2099-07-26T08:00:00.000Z'),
+    ingredients: [{ position: 0, rawText: '1 onion' }],
+    missing: [],
+  };
+}
 
 function advancingClock(): () => Date {
   let time = Date.parse('2026-07-26T07:00:00.000Z');

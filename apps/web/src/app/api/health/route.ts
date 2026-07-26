@@ -44,7 +44,7 @@ export async function GET() {
     return NextResponse.json(
       {
         status: seeded ? 'ok' : 'degraded',
-        phase: 1,
+        phase: 2,
         timestamp: new Date().toISOString(),
         database: {
           reachable: true,
@@ -67,7 +67,7 @@ export async function GET() {
     return NextResponse.json(
       {
         status: 'error',
-        phase: 1,
+        phase: 2,
         timestamp: new Date().toISOString(),
         database: {
           reachable: false,

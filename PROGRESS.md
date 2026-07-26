@@ -11,7 +11,7 @@ on Peter**.
 
 | Item | Needed by | Status |
 |---|---|---|
-| `OPENROUTER_API_KEY` | Phase 2 | ⬜ not yet provided |
+| `OPENROUTER_API_KEY` | Phase 2 | ✅ configured in local `.env` (never printed or committed) |
 | Reddit API credentials | Phase 2 (Reddit source only) | ⛔ blocked — see below |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Phase 4 | ◐ OAuth client + test user configured; values not yet copied into `.env` |
 
@@ -75,6 +75,60 @@ Consequence: Zod validation stays (it is the TypeScript type boundary and
 guards against provider fallback), but the repair retry becomes a rarely-hit
 safety net rather than the expected path. §2's "Alternative worth prototyping"
 — the `emit_recipe` tool-calling hack — is **not needed** and will not be built.
+
+### A8 — Enrichment is a durable post-insert gate
+*Phase 2. Reason: restart safety and an auditable Phase 1 → Phase 2 boundary.*
+
+PLAN.md describes `classifySuitability()` as running before insert. In the
+implemented pipeline, deterministic ingestion always persists a complete source
+record as `status='pending'`; an exclusive restart-safe Phase 2 job then
+publishes it atomically as `active` or `rejected`. Changed upstream content
+clears stale enrichment fields and returns the row to `pending`.
+
+This preserves every source decision, avoids holding a crawl transaction open
+across provider calls, and lets a budget stop or worker restart resume from the
+oldest unfinished row without repeating completed LLM work. Public recipe
+queries default to `active`, so pending work never leaks into browse results.
+
+### A9 — OpenRouter uses `max_tokens` with reasoning-safe output headroom
+*Phase 2. Verified live on 2026-07-26.*
+
+With `provider.require_parameters=true`, OpenRouter could not route
+`max_completion_tokens` for `deepseek/deepseek-v4-flash`; the model capability
+is exposed as `max_tokens`. After that correction, tiny JSON-shaped ceilings
+still failed intermittently because DeepSeek reasoning tokens count against the
+same output budget: live responses exhausted 180/1,024 tokens before emitting
+complete JSON.
+
+Requests now use deterministic temperature 0, 4,096 tokens for the compact
+classification/derived-field/blurb tasks and 8,192 for extraction/semantic
+mapping. Strict JSON Schema plus local Zod validation remains the contract, and
+one independently budget-guarded repair remains the bounded safety net.
+
+### A10 — Reddit is runtime-ready but live-disabled pending credentials
+*Phase 2. Reddit credentials remain blocked by the setup issue above.*
+
+The official OAuth client, listing/comment discovery, deterministic external
+blog routing, JSON-LD/HTML/post extraction, image/ingredient/persistence path,
+telemetry and budget hooks are all wired into the production scan runtime.
+Database-backed tests exercise the enabled path with mocked Reddit/provider
+boundaries. The canonical source row remains `enabled=false`, and disabled
+startup never reads credentials.
+
+PLAN.md's Phase 2 exit phrase “Reddit is reachable” is therefore amended to:
+**the complete runtime is mock-verified and ready to enable; a live Reddit call
+is deferred until credentials can be created.** This does not block the blog
+backfill or Phase 2 completion.
+
+### A11 — The LLM budget is a serialized UTC-day hard guard
+*Phase 2. Reason: scan fallback and backlog enrichment use separate queues.*
+
+Every billable provider attempt acquires a transaction-scoped Postgres advisory
+lease, re-reads durable UTC-day spend, records provider-reported usage before
+parsing, then releases the lease. This prevents concurrent HTML/Reddit fallback
+and enrichment calls from racing past the cap. Malformed responses and repairs
+are charged immediately, and scan finalization cannot overwrite an already
+durable increment.
 
 ### A3 — Source list resolved (PLAN.md §8, open question 11)
 Budget Bytes, Pinch of Yum, Downshiftology, GypsyPlate, Skinnytaste, The

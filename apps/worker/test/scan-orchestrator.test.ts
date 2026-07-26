@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RecipeIngredient } from '@recipes/shared';
+import type { DiscoverResult } from '../src/scanner/discover';
 import type { FetchOk, FetchResult } from '../src/scanner/fetcher';
 import type { ExtractionResult, RecipeDraft } from '../src/scanner/jsonld';
 import {
@@ -214,6 +215,214 @@ describe('Phase 1 scan orchestration', () => {
     );
   });
 
+  it('never calls the optional fallback for an insertable deterministic recipe', async () => {
+    const htmlFallback =
+      vi.fn<NonNullable<ScanOrchestrationDependencies['htmlFallback']>>();
+    const dependencies = baseDependencies({
+      htmlFallback,
+      async discover() {
+        return discovered('https://example.com/deterministic/');
+      },
+    });
+
+    const summary = await createScanOrchestrator(dependencies).scanSource(SOURCE);
+
+    expect(summary).toMatchObject({
+      status: 'success',
+      found: 1,
+      newCount: 1,
+      noRecipeCount: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+      costUsd: 0,
+    });
+    expect(htmlFallback).not.toHaveBeenCalled();
+  });
+
+  it('retains the Phase 1 retry behavior for incomplete JSON-LD when no fallback is installed', async () => {
+    const dependencies = baseDependencies({
+      async discover() {
+        return discovered('https://example.com/incomplete-jsonld/');
+      },
+      toDraft: vi.fn(() => null),
+    });
+
+    const summary = await createScanOrchestrator(dependencies).scanSource(SOURCE);
+
+    expect(summary).toMatchObject({
+      status: 'partial',
+      found: 1,
+      newCount: 0,
+      noRecipeCount: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+      costUsd: 0,
+      error: expect.stringContaining(
+        'Recipe JSON-LD had no insertable title/ingredients',
+      ),
+    });
+    expect(dependencies.finishSourceScan).toHaveBeenCalledWith(
+      expect.objectContaining({ retryRequired: true }),
+    );
+  });
+
+  it('counts a guarded zero-token fallback skip as no Recipe', async () => {
+    const htmlFallback =
+      vi.fn<NonNullable<ScanOrchestrationDependencies['htmlFallback']>>(
+        async () => ({ outcome: 'skip', reason: 'roundup' }),
+      );
+    const dependencies = baseDependencies({
+      htmlFallback,
+      async discover() {
+        return discovered('https://example.com/roundup/');
+      },
+      async fetchPage(_source, item) {
+        return okPage(item.url, 'no-recipe');
+      },
+    });
+
+    const summary = await createScanOrchestrator(dependencies).scanSource(SOURCE);
+
+    expect(summary).toMatchObject({
+      status: 'success',
+      found: 0,
+      newCount: 0,
+      noRecipeCount: 1,
+      tokensIn: 0,
+      tokensOut: 0,
+      costUsd: 0,
+    });
+    expect(htmlFallback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        html: 'no-recipe',
+        pageUrl: 'https://example.com/roundup/',
+        extraction: expect.objectContaining({ found: false }),
+      }),
+    );
+    expect(dependencies.persistRecipe).not.toHaveBeenCalled();
+  });
+
+  it('records a paid not-recipe decision without incrementing the zero-token counter', async () => {
+    const finished = vi.fn<ScanOrchestrationDependencies['finishSourceScan']>();
+    const dependencies = baseDependencies({
+      finishSourceScan: finished,
+      async discover() {
+        return discovered('https://example.com/editorial/');
+      },
+      async fetchPage(_source, item) {
+        return okPage(item.url, 'no-recipe');
+      },
+      async htmlFallback() {
+        return {
+          outcome: 'not-recipe',
+          reason: 'editorial article',
+          usage: { tokensIn: 120, tokensOut: 8, costUsd: 0.00012 },
+        };
+      },
+    });
+
+    const summary = await createScanOrchestrator(dependencies).scanSource(SOURCE);
+
+    expect(summary).toMatchObject({
+      status: 'success',
+      found: 0,
+      newCount: 0,
+      noRecipeCount: 0,
+      tokensIn: 120,
+      tokensOut: 8,
+      costUsd: 0.00012,
+    });
+    expect(finished).toHaveBeenCalledWith(
+      expect.objectContaining({
+        retryRequired: false,
+        tokensIn: 120,
+        tokensOut: 8,
+        costUsd: 0.00012,
+      }),
+    );
+    expect(dependencies.persistRecipe).not.toHaveBeenCalled();
+  });
+
+  it('continues through normalization and persistence for a paid fallback recipe', async () => {
+    const fallbackDraft = draft('https://example.com/fallback-recipe/');
+    const persisted =
+      vi.fn<ScanOrchestrationDependencies['persistRecipe']>(
+        async (input) => ({
+          outcome: 'inserted',
+          recipeId: 'fallback-recipe',
+          sourceUrl: input.draft.sourceUrl,
+        }),
+      );
+    const dependencies = baseDependencies({
+      async discover() {
+        return discovered('https://example.com/fallback-recipe/');
+      },
+      async fetchPage(_source, item) {
+        return okPage(item.url, 'no-recipe');
+      },
+      async htmlFallback() {
+        return {
+          outcome: 'recipe',
+          draft: fallbackDraft,
+          usage: { tokensIn: 240, tokensOut: 60, costUsd: 0.0005 },
+        };
+      },
+      persistRecipe: persisted,
+    });
+
+    const summary = await createScanOrchestrator(dependencies).scanSource(SOURCE);
+
+    expect(summary).toMatchObject({
+      status: 'success',
+      found: 1,
+      newCount: 1,
+      noRecipeCount: 0,
+      tokensIn: 240,
+      tokensOut: 60,
+      costUsd: 0.0005,
+    });
+    expect(dependencies.normalizeIngredients).toHaveBeenCalledWith(['1 onion']);
+    expect(persisted).toHaveBeenCalledWith(
+      expect.objectContaining({ draft: fallbackDraft }),
+    );
+  });
+
+  it('makes a fallback failure retryable and finalizes a partial source run', async () => {
+    const finished = vi.fn<ScanOrchestrationDependencies['finishSourceScan']>();
+    const dependencies = baseDependencies({
+      finishSourceScan: finished,
+      async discover() {
+        return discovered('https://example.com/fallback-error/');
+      },
+      async fetchPage(_source, item) {
+        return okPage(item.url, 'no-recipe');
+      },
+      async htmlFallback() {
+        throw new Error('OpenRouter unavailable');
+      },
+    });
+
+    const summary = await createScanOrchestrator(dependencies).scanSource(SOURCE);
+
+    expect(summary).toMatchObject({
+      status: 'partial',
+      found: 0,
+      newCount: 0,
+      noRecipeCount: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+      costUsd: 0,
+      error: expect.stringContaining('OpenRouter unavailable'),
+    });
+    expect(finished).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'partial',
+        retryRequired: true,
+        discovery: expect.any(Object),
+      }),
+    );
+  });
+
   it('finalizes telemetry before propagating a shutdown abort for pg-boss retry', async () => {
     const controller = new AbortController();
     const finished = vi.fn<ScanOrchestrationDependencies['finishSourceScan']>();
@@ -336,6 +545,17 @@ function baseDependencies(
     ),
     markRecipeSeen: vi.fn(async () => true),
     ...overrides,
+  };
+}
+
+function discovered(url: string): DiscoverResult {
+  return {
+    urls: [{ url }],
+    via: ['feed'],
+    feedUnchanged: false,
+    feedEtag: '"feed-new"',
+    feedLastModified: null,
+    warnings: [],
   };
 }
 

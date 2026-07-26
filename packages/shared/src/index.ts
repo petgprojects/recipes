@@ -12,4 +12,5 @@ export * from './units';
 export * from './schemas';
 export * from './ingredients';
 export * from './blog-sources';
+export * from './reddit-sources';
 export * from './scan-jobs';

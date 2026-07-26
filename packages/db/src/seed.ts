@@ -8,6 +8,7 @@
  *   ✔ one self-alias per ingredient, so stage 2 of the matcher has exact-match
  *     hits from the very first crawl rather than sending all 117 to the LLM;
  *   ✔ the eight canonical Phase 1 blog sources, including enabled Serious Eats;
+ *   ✔ one disabled Phase 2 Reddit adapter whose later enabled flag is preserved;
  *   ✔ a `dev@local` user, development only (§4: "`getCurrentUser()` returns it
  *     when `NODE_ENV !== 'production'` ... in production, no session means no
  *     user");
@@ -23,6 +24,7 @@ import { sql } from 'drizzle-orm';
 import {
   BLOG_SOURCES,
   CANONICAL_INGREDIENTS,
+  REDDIT_SOURCES,
   ingredientAliasKey,
 } from '@recipes/shared';
 import { createClient, type Database } from './client';
@@ -62,7 +64,7 @@ export async function seed(db: Database, nodeEnv = process.env.NODE_ENV): Promis
       enabled: source.enabled,
       crawlDelayS: source.crawlDelayS,
     }));
-    const seededSources = await tx
+    const seededBlogSources = await tx
       .insert(sources)
       .values(sourceRows)
       .onConflictDoUpdate({
@@ -73,6 +75,30 @@ export async function seed(db: Database, nodeEnv = process.env.NODE_ENV): Promis
           feedUrl: sql`excluded.feed_url`,
           enabled: sql`excluded.enabled`,
           crawlDelayS: sql`excluded.crawl_delay_s`,
+        },
+      })
+      .returning({ id: sources.id });
+
+    const redditRows = REDDIT_SOURCES.map((source) => ({
+      name: source.name,
+      kind: 'reddit' as const,
+      baseUrl: source.baseUrl,
+      feedUrl: null,
+      enabled: source.enabled,
+      crawlDelayS: source.crawlDelayS,
+    }));
+    const seededRedditSources = await tx
+      .insert(sources)
+      .values(redditRows)
+      .onConflictDoUpdate({
+        target: sources.baseUrl,
+        set: {
+          name: sql`excluded.name`,
+          kind: sql`excluded.kind`,
+          feedUrl: sql`excluded.feed_url`,
+          crawlDelayS: sql`excluded.crawl_delay_s`,
+          // Deliberately omit `enabled`: Reddit ships disabled, but once an
+          // operator enables it that decision must survive every startup seed.
         },
       })
       .returning({ id: sources.id });
@@ -116,7 +142,7 @@ export async function seed(db: Database, nodeEnv = process.env.NODE_ENV): Promis
     return {
       ingredients: inserted.length,
       aliases: aliases.length,
-      sources: seededSources.length,
+      sources: seededBlogSources.length + seededRedditSources.length,
       devUser,
     };
   });
@@ -132,7 +158,7 @@ if (invokedDirectly) {
     .then((result) => {
       console.log(
         `seeded ${result.ingredients} ingredients, ${result.aliases} new aliases, ` +
-          `${result.sources} blog sources` +
+          `${result.sources} sources` +
           (result.devUser ? `, ${DEV_USER_EMAIL} user` : ', no dev user (production)'),
       );
     })

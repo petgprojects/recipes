@@ -52,6 +52,19 @@ integration('transactional recipe persistence', () => {
     expect(inserted.outcome).toBe('inserted');
     expect(inserted.sourceUrl).toBe(CANONICAL_TEST_URL);
 
+    await db
+      .update(recipes)
+      .set({
+        blurb: 'A durable enrichment result.',
+        keepsDays: 4,
+        freezerMonths: 2,
+        category: 'Vegetarian',
+        tags: ['One pot'],
+        status: 'active',
+        rejectionReason: null,
+      })
+      .where(eq(recipes.id, inserted.recipeId));
+
     const unchanged = await persistRecipeDraft(db, {
       sourceId,
       // Same hash is authoritative: these changed values must not land.
@@ -73,6 +86,13 @@ integration('transactional recipe persistence', () => {
       pageEtag: '"v1b"',
       firstSeenAt: firstSeen,
       lastSeenAt: seenAgain,
+      blurb: 'A durable enrichment result.',
+      keepsDays: 4,
+      freezerMonths: 2,
+      category: 'Vegetarian',
+      tags: ['One pot'],
+      status: 'active',
+      rejectionReason: null,
     });
     expect(await ingredientTexts(inserted.recipeId)).toEqual(['1 onion', '2 carrots']);
 
@@ -100,6 +120,15 @@ integration('transactional recipe persistence', () => {
       .where(eq(recipes.sourceUrl, CANONICAL_TEST_URL));
     expect(row?.contentHash).toBe('hash-v2');
     expect(row?.title).toBe('Updated title');
+    expect(row).toMatchObject({
+      blurb: null,
+      keepsDays: null,
+      freezerMonths: null,
+      category: null,
+      tags: [],
+      status: 'pending',
+      rejectionReason: null,
+    });
     expect(await ingredientTexts(inserted.recipeId)).toEqual(['3 potatoes']);
 
     await expect(

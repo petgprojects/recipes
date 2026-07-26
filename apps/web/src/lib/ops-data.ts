@@ -57,8 +57,16 @@ export interface LatestAggregate {
 export interface OpsSnapshot {
   totals: {
     recipes: number;
+    activeRecipes: number;
+    pendingRecipes: number;
+    rejectedRecipes: number;
     sources: number;
     enabledSources: number;
+  };
+  llmToday: {
+    tokensIn: number;
+    tokensOut: number;
+    costUsd: number;
   };
   latest: LatestAggregate;
   sources: OpsSource[];
@@ -86,8 +94,15 @@ export async function loadOpsSnapshot(): Promise<OpsSnapshot> {
     .limit(1)
     .as('latest_source_scan');
 
-  const [recipeTotal, sourceTotal, sourceRows, recentRows] = await Promise.all([
-    db.select({ count: sql<number>`count(*)::int` }).from(recipes),
+  const [recipeTotal, sourceTotal, sourceRows, recentRows, llmToday] = await Promise.all([
+    db
+      .select({
+        count: sql<number>`count(*)::int`,
+        activeCount: sql<number>`count(*) filter (where ${recipes.status} = 'active')::int`,
+        pendingCount: sql<number>`count(*) filter (where ${recipes.status} = 'pending')::int`,
+        rejectedCount: sql<number>`count(*) filter (where ${recipes.status} = 'rejected')::int`,
+      })
+      .from(recipes),
     db
       .select({
         count: sql<number>`count(*)::int`,
@@ -134,6 +149,19 @@ export async function loadOpsSnapshot(): Promise<OpsSnapshot> {
       .leftJoin(sources, eq(scanRuns.sourceId, sources.id))
       .orderBy(desc(scanRuns.startedAt))
       .limit(RECENT_SCAN_LIMIT),
+    db
+      .select({
+        tokensIn: sql<number>`coalesce(sum(${scanRuns.tokensIn}), 0)::int`,
+        tokensOut: sql<number>`coalesce(sum(${scanRuns.tokensOut}), 0)::int`,
+        costUsd: sql<number>`coalesce(sum(${scanRuns.costUsd}), 0)::double precision`,
+      })
+      .from(scanRuns)
+      .where(
+        sql`${scanRuns.startedAt} >= (
+          date_trunc('day', now() at time zone 'UTC')
+          at time zone 'UTC'
+        )`,
+      ),
   ]);
 
   const sourceSnapshots: OpsSource[] = sourceRows.map((row) => ({
@@ -169,8 +197,16 @@ export async function loadOpsSnapshot(): Promise<OpsSnapshot> {
   return {
     totals: {
       recipes: recipeTotal[0]?.count ?? 0,
+      activeRecipes: recipeTotal[0]?.activeCount ?? 0,
+      pendingRecipes: recipeTotal[0]?.pendingCount ?? 0,
+      rejectedRecipes: recipeTotal[0]?.rejectedCount ?? 0,
       sources: sourceTotal[0]?.count ?? 0,
       enabledSources: sourceTotal[0]?.enabledCount ?? 0,
+    },
+    llmToday: {
+      tokensIn: llmToday[0]?.tokensIn ?? 0,
+      tokensOut: llmToday[0]?.tokensOut ?? 0,
+      costUsd: llmToday[0]?.costUsd ?? 0,
     },
     latest: aggregateLatest(sourceSnapshots),
     sources: sourceSnapshots,

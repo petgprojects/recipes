@@ -1,1 +1,0 @@
-Phase 2 (PLAN.md §2, §5 + PROGRESS.md A1/A2): one OpenRouter client (`openai` npm package, `baseURL` swapped, model `deepseek/deepseek-v4-flash`) plus one file per task — `classifySuitability`, `deriveFields`, `extractRecipe`, `extractRecipeFromPost`, `writeBlurb`. Each a pure `input -> Zod-validated output` function; no agent loop. Empty on purpose — Phase 0 makes no LLM calls.

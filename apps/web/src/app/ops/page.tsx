@@ -61,10 +61,10 @@ export default async function OpsPage() {
             <a className={styles.backLink} href="/">
               Recipe planner
             </a>
-            <p className={styles.kicker}>Operations / deterministic ingestion</p>
+            <p className={styles.kicker}>Operations / ingestion + enrichment</p>
             <h1>Source health</h1>
             <p className={styles.intro}>
-              Current crawl checkpoints, latest source outcomes, and queue control.
+              Crawl checkpoints, enrichment progress, LLM spend, and queue control.
             </p>
           </div>
           <ScanNowButton />
@@ -76,12 +76,12 @@ export default async function OpsPage() {
             <strong>{numberFormatter.format(snapshot.totals.recipes)}</strong>
           </div>
           <div>
-            <span>Sources</span>
-            <strong>{numberFormatter.format(snapshot.totals.sources)}</strong>
+            <span>Ready</span>
+            <strong>{numberFormatter.format(snapshot.totals.activeRecipes)}</strong>
           </div>
           <div>
-            <span>Enabled</span>
-            <strong>{numberFormatter.format(snapshot.totals.enabledSources)}</strong>
+            <span>Pending</span>
+            <strong>{numberFormatter.format(snapshot.totals.pendingRecipes)}</strong>
           </div>
         </section>
 
@@ -129,8 +129,8 @@ export default async function OpsPage() {
                 <dd>{numberFormatter.format(snapshot.latest.noRecipeCount)}</dd>
               </div>
               <div>
-                <dt>LLM cost</dt>
-                <dd>{formatCost(snapshot.latest.costUsd)}</dd>
+                <dt>LLM UTC day</dt>
+                <dd>{formatCost(snapshot.llmToday.costUsd)}</dd>
               </div>
             </dl>
           </div>

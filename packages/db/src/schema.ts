@@ -179,6 +179,19 @@ export const recipes = pgTable(
     index('recipes_last_seen_at_idx').on(t.lastSeenAt.desc()),
     check('recipes_tags_vocab', sql.raw(`"tags" <@ ${textArrayLiteral(TAGS)}`)),
     check('recipes_source_rating_range', sql`${t.sourceRating} is null or (${t.sourceRating} >= 0 and ${t.sourceRating} <= 5)`),
+    // A rejected row must explain the gate decision; pending/active rows must
+    // not carry a stale reason from an earlier classification.
+    check(
+      'recipes_rejection_reason_status',
+      sql`(${t.status} = 'rejected' and ${t.rejectionReason} is not null) or (${t.status} <> 'rejected' and ${t.rejectionReason} is null)`,
+    ),
+    // `active` is the public, fully enriched state. Shelf life may genuinely
+    // be unknown and an empty tag list is valid, but every active card needs
+    // our own blurb and one controlled category.
+    check(
+      'recipes_active_enrichment_complete',
+      sql`${t.status} <> 'active' or (${t.blurb} is not null and ${t.category} is not null)`,
+    ),
   ],
 );
 

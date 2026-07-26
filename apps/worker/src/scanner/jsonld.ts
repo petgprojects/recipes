@@ -819,7 +819,7 @@ export interface RecipeDraft {
   readonly sourceRating: number | null;
   readonly sourceRatingCount: number | null;
   readonly instructions: ExtractedInstruction[];
-  readonly rawJsonld: Record<string, unknown>;
+  readonly rawJsonld: Record<string, unknown> | null;
   readonly publishedAt: Date | null;
   /** Raw ingredient lines, positioned. Canonicalisation is a separate stage. */
   readonly ingredients: { position: number; rawText: string }[];

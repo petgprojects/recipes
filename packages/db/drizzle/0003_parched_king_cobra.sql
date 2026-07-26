@@ -1,0 +1,2 @@
+ALTER TABLE "recipes" ADD CONSTRAINT "recipes_rejection_reason_status" CHECK (("recipes"."status" = 'rejected' and "recipes"."rejection_reason" is not null) or ("recipes"."status" <> 'rejected' and "recipes"."rejection_reason" is null));--> statement-breakpoint
+ALTER TABLE "recipes" ADD CONSTRAINT "recipes_active_enrichment_complete" CHECK ("recipes"."status" <> 'active' or ("recipes"."blurb" is not null and "recipes"."category" is not null));

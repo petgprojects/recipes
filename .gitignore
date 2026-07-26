@@ -1,0 +1,23 @@
+node_modules/
+.pnpm-store/
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+.env
+.env.local
+.env.*.local
+
+.DS_Store
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+coverage/
+.vitest/
+
+# local volumes / cached recipe images if ever bind-mounted
+/pgdata/
+/recipe-images/

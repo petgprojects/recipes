@@ -7,29 +7,33 @@
  *     canonical table with the ~120 ingredients already in the artifact");
  *   ✔ one self-alias per ingredient, so stage 2 of the matcher has exact-match
  *     hits from the very first crawl rather than sending all 117 to the LLM;
+ *   ✔ the eight canonical Phase 1 blog sources, including enabled Serious Eats;
  *   ✔ a `dev@local` user, development only (§4: "`getCurrentUser()` returns it
  *     when `NODE_ENV !== 'production'` ... in production, no session means no
  *     user");
- *   ✘ no recipes and no sources. PLAN.md §8: "No seeded recipes — only the
- *     ~120 canonical ingredients." Phase 1 owns the `sources` rows, and every
- *     recipe in the system arrives from a crawl.
+ *   ✘ no recipes. Every recipe in the system arrives from a crawl.
  *
- * Re-running is a no-op apart from refreshing aisle/default-unit if the JSON
- * changed, so this is safe to wire into container start-up.
+ * Re-running is a no-op apart from refreshing canonical ingredient/source
+ * configuration when it changes, so this is safe to wire into container start-up.
  */
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sql } from 'drizzle-orm';
-import { CANONICAL_INGREDIENTS, ingredientAliasKey } from '@recipes/shared';
+import {
+  BLOG_SOURCES,
+  CANONICAL_INGREDIENTS,
+  ingredientAliasKey,
+} from '@recipes/shared';
 import { createClient, type Database } from './client';
-import { ingredientAliases, ingredients, users } from './schema';
+import { ingredientAliases, ingredients, sources, users } from './schema';
 
 export const DEV_USER_EMAIL = 'dev@local';
 
 export interface SeedResult {
   ingredients: number;
   aliases: number;
+  sources: number;
   devUser: boolean;
 }
 
@@ -50,6 +54,29 @@ export async function seed(db: Database, nodeEnv = process.env.NODE_ENV): Promis
   ];
 
   return db.transaction(async (tx) => {
+    const sourceRows = BLOG_SOURCES.map((source) => ({
+      name: source.name,
+      kind: 'blog' as const,
+      baseUrl: source.baseUrl,
+      feedUrl: source.feedUrl,
+      enabled: source.enabled,
+      crawlDelayS: source.crawlDelayS,
+    }));
+    const seededSources = await tx
+      .insert(sources)
+      .values(sourceRows)
+      .onConflictDoUpdate({
+        target: sources.baseUrl,
+        set: {
+          name: sql`excluded.name`,
+          kind: sql`excluded.kind`,
+          feedUrl: sql`excluded.feed_url`,
+          enabled: sql`excluded.enabled`,
+          crawlDelayS: sql`excluded.crawl_delay_s`,
+        },
+      })
+      .returning({ id: sources.id });
+
     // Upsert on the natural key. `set` rather than `doNothing` so an edit to
     // ingredient-seed.json (a re-classified aisle, say) actually lands.
     const inserted = await tx
@@ -86,7 +113,12 @@ export async function seed(db: Database, nodeEnv = process.env.NODE_ENV): Promis
       devUser = true;
     }
 
-    return { ingredients: inserted.length, aliases: aliases.length, devUser };
+    return {
+      ingredients: inserted.length,
+      aliases: aliases.length,
+      sources: seededSources.length,
+      devUser,
+    };
   });
 }
 
@@ -99,7 +131,8 @@ if (invokedDirectly) {
   seed(db)
     .then((result) => {
       console.log(
-        `seeded ${result.ingredients} ingredients, ${result.aliases} new aliases` +
+        `seeded ${result.ingredients} ingredients, ${result.aliases} new aliases, ` +
+          `${result.sources} blog sources` +
           (result.devUser ? `, ${DEV_USER_EMAIL} user` : ', no dev user (production)'),
       );
     })

@@ -1,5 +1,5 @@
 /**
- * Capture test fixtures from the nine real sources (PROGRESS.md A3).
+ * Capture test fixtures from the eight canonical blog sources.
  *
  * Run manually, never in CI: `corepack pnpm --filter @recipes/worker capture`.
  * CI reads the committed output of this script and never touches the network.
@@ -12,108 +12,16 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  BLOG_SOURCES,
+  isRecipeUrlForSource,
+  type BlogSourceConfig,
+} from '@recipes/shared';
 import { createFetcher, type PoliteFetcher } from '../src/scanner/fetcher';
 import { parseFeed, parseSitemap, type DiscoveredUrl } from '../src/scanner/discover';
 import { isPathAllowed, parseRobotsTxt } from '../src/scanner/robots';
 
 const PAGES_PER_SITE = 3;
-
-interface SiteSpec {
-  readonly slug: string;
-  readonly name: string;
-  readonly baseUrl: string;
-  /** Tried in order; the first that parses to ≥1 item wins. */
-  readonly feedCandidates: string[];
-  /** Sitemap roots, used when the site publishes no usable feed. */
-  readonly sitemapCandidates?: string[];
-  /** Keeps round-ups and category pages out of the sample. */
-  readonly looksLikeRecipe?: (url: string) => boolean;
-  /**
-   * Extra permalinks captured after the discovered ones. Used where the feed
-   * is dominated by round-up posts, so the sample still contains at least one
-   * genuine single-recipe page — otherwise the coverage report would blame a
-   * site for lacking Recipe JSON-LD on pages that are not recipes.
-   */
-  readonly extraPages?: string[];
-}
-
-const SITES: SiteSpec[] = [
-  {
-    slug: 'budget-bytes',
-    name: 'Budget Bytes',
-    baseUrl: 'https://www.budgetbytes.com',
-    feedCandidates: ['https://www.budgetbytes.com/feed/'],
-  },
-  {
-    slug: 'pinch-of-yum',
-    name: 'Pinch of Yum',
-    baseUrl: 'https://pinchofyum.com',
-    feedCandidates: ['https://pinchofyum.com/feed', 'https://pinchofyum.com/feed/'],
-  },
-  {
-    slug: 'downshiftology',
-    name: 'Downshiftology',
-    baseUrl: 'https://downshiftology.com',
-    feedCandidates: ['https://downshiftology.com/feed/'],
-    // Every item in the feed on capture day was a round-up ("What to cook in
-    // July"), so two real permalinks are probed as well.
-    extraPages: [
-      'https://downshiftology.com/recipes/chicken-piccata/',
-      'https://downshiftology.com/recipes/greek-baked-cod/',
-    ],
-  },
-  {
-    slug: 'gypsyplate',
-    name: 'GypsyPlate',
-    baseUrl: 'https://gypsyplate.com',
-    feedCandidates: ['https://gypsyplate.com/feed/'],
-    // `/feed/` 302s to the homepage and `/sitemap_index.xml` is 403 behind the
-    // host's WAF, but plain `/sitemap.xml` serves a normal Yoast index.
-    sitemapCandidates: ['https://gypsyplate.com/sitemap_index.xml', 'https://gypsyplate.com/sitemap.xml'],
-    looksLikeRecipe: (url) => new URL(url).pathname.replace(/\/+$/, '').length > 1,
-  },
-  {
-    slug: 'classpop',
-    name: 'Classpop',
-    baseUrl: 'https://www.classpop.com',
-    // No feed exists anywhere on the host; the sitemap is the only discovery
-    // surface, and even that leads to a magazine rather than to recipes.
-    feedCandidates: [
-      'https://www.classpop.com/magazine/feed',
-      'https://www.classpop.com/feed',
-      'https://www.classpop.com/blog/feed',
-    ],
-    sitemapCandidates: ['https://www.classpop.com/sitemap_files/magazine.xml'],
-    looksLikeRecipe: (url) => /recipe|dinner|dessert|cake|cook|bake|lunch/i.test(url),
-  },
-  {
-    slug: 'skinnytaste',
-    name: 'Skinnytaste',
-    baseUrl: 'https://www.skinnytaste.com',
-    feedCandidates: ['https://www.skinnytaste.com/feed/'],
-  },
-  {
-    slug: 'the-kitchn',
-    name: 'The Kitchn',
-    baseUrl: 'https://www.thekitchn.com',
-    feedCandidates: ['https://www.thekitchn.com/main.rss', 'https://www.thekitchn.com/feed'],
-  },
-  {
-    slug: 'love-and-lemons',
-    name: 'Love & Lemons',
-    baseUrl: 'https://www.loveandlemons.com',
-    feedCandidates: ['https://www.loveandlemons.com/feed/'],
-  },
-  {
-    slug: 'serious-eats',
-    name: 'Serious Eats',
-    baseUrl: 'https://www.seriouseats.com',
-    feedCandidates: ['https://www.seriouseats.com/rss', 'https://www.seriouseats.com/feeds/all.rss'],
-    sitemapCandidates: ['https://www.seriouseats.com/sitemap.xml'],
-    // `…-recipe-<id>` is a single recipe; a bare `…-recipes-<id>` is a hub.
-    looksLikeRecipe: (url) => /-recipe-\d+$/.test(url),
-  },
-];
 
 interface PageRecord {
   file: string;
@@ -159,9 +67,10 @@ async function main(): Promise<void> {
   const fetcher = createFetcher({ minDelayMs: 1_500, timeoutMs: 30_000, maxBytes: 8 * 1024 * 1024 });
 
   // `capture budget-bytes serious-eats` re-probes just those sites, so fixing
-  // one source does not mean re-fetching all nine.
+  // one source does not mean re-fetching all eight.
   const only = new Set(process.argv.slice(2));
-  const selected = only.size === 0 ? SITES : SITES.filter((site) => only.has(site.slug));
+  const selected: readonly BlogSourceConfig[] =
+    only.size === 0 ? BLOG_SOURCES : BLOG_SOURCES.filter((site) => only.has(site.slug));
 
   for (const site of selected) {
     const dir = join(fixturesDir, site.slug);
@@ -209,7 +118,7 @@ async function main(): Promise<void> {
 
     // ── feed ───────────────────────────────────────────────────────────────
     let items: { url: string; title?: string; publishedAt?: Date }[] = [];
-    for (const candidate of site.feedCandidates) {
+    for (const candidate of site.fixtureFeedUrls ?? (site.feedUrl ? [site.feedUrl] : [])) {
       const result = await fetcher.fetch(candidate, {
         accept: 'application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.8',
       });
@@ -242,8 +151,8 @@ async function main(): Promise<void> {
     }
 
     // ── sitemap fallback ───────────────────────────────────────────────────
-    if (items.length === 0 && site.sitemapCandidates) {
-      for (const candidate of site.sitemapCandidates) {
+    if (items.length === 0 && site.sitemapUrls.length > 0) {
+      for (const candidate of site.sitemapUrls) {
         const found = await captureSitemap(fetcher, candidate, dir, manifest);
         if (found.length > 0) {
           items = found;
@@ -255,8 +164,8 @@ async function main(): Promise<void> {
 
     // ── pages ──────────────────────────────────────────────────────────────
     const candidates: { url: string; title?: string; publishedAt?: Date; probe?: boolean }[] = [
-      ...items.filter((item) => site.looksLikeRecipe?.(item.url) ?? true).slice(0, PAGES_PER_SITE),
-      ...(site.extraPages ?? []).map((url) => ({ url, probe: true })),
+      ...items.filter((item) => isRecipeUrlForSource(site, item.url)).slice(0, PAGES_PER_SITE),
+      ...(site.fixtureProbeUrls ?? []).map((url) => ({ url, probe: true })),
     ];
     let saved = 0;
     for (const item of candidates) {

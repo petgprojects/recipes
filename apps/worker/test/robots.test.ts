@@ -124,7 +124,6 @@ describe('the robots.txt files we actually captured', () => {
       ['the-kitchn', 'https://www.thekitchn.com/kalua-pork-recipe-23791234'],
       ['love-and-lemons', 'https://www.loveandlemons.com/peach-crisp/'],
       ['serious-eats', 'https://www.seriouseats.com/tartiflette-recipe-5217300'],
-      ['classpop', 'https://www.classpop.com/magazine/virtual-dinner-party'],
     ] as const) {
       expect(isPathAllowed(parseRobotsTxt(fixture(site)), UA, url), site).toBe(true);
     }

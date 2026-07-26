@@ -1,4 +1,4 @@
-# JSON-LD coverage across the nine sources
+# JSON-LD coverage across the eight sources
 
 Captured **2026-07-26** with `pnpm --filter @recipes/worker capture`, which uses
 the same `PoliteFetcher` as the worker: robots.txt honoured, real User-Agent
@@ -6,9 +6,9 @@ the same `PoliteFetcher` as the worker: robots.txt honoured, real User-Agent
 between requests to a host, ~3 pages per site. Regenerate the numbers below
 with `pnpm --filter @recipes/worker coverage`.
 
-**Headline: 21 of 29 captured pages carry schema.org Recipe JSON-LD, and every
-one of the nine sources publishes it on its actual recipe pages. Not one page
-in the corpus needs the LLM extractor. The eight pages without a Recipe node
+**Headline: 21 of 26 captured pages carry schema.org Recipe JSON-LD, and every
+one of the eight sources publishes it on its actual recipe pages. Not one page
+in the corpus needs the LLM extractor. The five pages without a Recipe node
 are not recipes** — they are round-ups and listicles that arrived through the
 feed, which is a *discovery* problem and a job for the Phase 2 suitability
 gate, not an extraction problem.
@@ -24,7 +24,6 @@ the bottom, and they are about *discovery* and *access*, not about JSON-LD.
 | **Pinch of Yum** | RSS `/feed` (6 items) | ✅ yes | 2/3 | none | Yoast `@graph`; `HowToStep.name` used as real headings; 3rd page is a round-up |
 | **Downshiftology** | RSS `/feed/` (10 items) | ✅ yes on `/recipes/*` | 2/5 | none | **All 10 feed items on capture day were round-ups**; the 2 recipe permalinks probed directly are perfect |
 | **GypsyPlate** | ⚠️ sitemap only | ✅ yes | 3/3 | none | `/feed/` 302s to the homepage; `sitemap_index.xml` is 403 behind the host WAF, plain `/sitemap.xml` works |
-| **Classpop** | sitemap only (no feed anywhere) | ❌ **no — and it never will** | 0/3 | n/a | Not a recipe site. See below. |
 | **Skinnytaste** | RSS `/feed/` (10 items) | ✅ yes | 2/3 | `rating` on 1 (new post) | Yoast `@graph`; `author` is an `@id` reference; feed URLs carry an `?adt_ei=*|EMAIL|*` merge tag |
 | **The Kitchn** | RSS `/main.rss` (20 items) | ✅ yes | 3/3 | **`aggregateRating` on all 3 — the field is simply absent** | `HowToSection` nesting on every page, incl. a "Recipe Notes" pseudo-section; 2–3 JSON-LD blocks per page |
 | **Love & Lemons** | RSS `/feed/` (10 items) | ✅ yes | 3/3 | none | Cleanest source in the set; two authors as an array; range yields (`"4 to 6"`) |
@@ -36,7 +35,7 @@ the bottom, and they are about *discovery* and *access*, not about JSON-LD.
 |---|---|---|
 | `name` | 21/21 | |
 | `recipeIngredient` | 21/21 | 6–29 lines. Budget Bytes embeds prices (`"1 tsp smoked paprika ($0.08)"`); the ingredient parser must cope. |
-| `recipeInstructions` | 21/21 | Always structured (`HowToStep`/`HowToSection`), never a bare HTML blob, on all nine sources. |
+| `recipeInstructions` | 21/21 | Always structured (`HowToStep`/`HowToSection`), never a bare HTML blob, on all eight sources. |
 | `image` | 21/21 | |
 | `datePublished` | 21/21 | |
 | `author` | 21/21 | **17/21 before `@id` dereferencing** — see below. |
@@ -96,39 +95,21 @@ the bottom, and they are about *discovery* and *access*, not about JSON-LD.
   `anthropic-ai`, `Claude-SearchBot`, `PerplexityBot`, `Google-Extended`,
   `Meta-ExternalAgent`). `RecipePlannerBot` is not on that list, so under
   `User-agent: *` we are technically permitted everything except `/embed?` and
-  `/cdn-cgi/` — but this project *does* feed scraped text to an LLM in Phase 2,
-  which is what that notice names. The file also states that not being blocked
-  is not a waiver. **Recommendation: ship Serious Eats with
-  `sources.enabled = false` until Peter decides, and never send its text to the
-  Phase 2 extractor.** This is a decision for the project owner, not for the
-  crawler.
+  `/cdn-cgi/`. The project owner has explicitly confirmed permission and
+  directed that this source be enabled; the crawl itself is deterministic, and
+  any later analysis is a separate Phase 2 concern. The canonical seed
+  therefore ships Serious Eats with `sources.enabled = true`.
 - **GypsyPlate sits behind a WAF (BigScoots).** `/sitemap_index.xml` returns
   403 while `/sitemap.xml` returns 200, and `/feed/` 302s to the homepage. The
   site is crawlable, but expect intermittent 403s; the fetcher's non-retry of
   4xx is correct here — retrying would look like an attack.
-- **Classpop's apex 301s to `www`**, and it has no feed at any conventional
-  path.
-
-## The one genuine failure: Classpop
-
-**Classpop publishes no recipe JSON-LD, has no RSS feed, and is not a recipe
-site.** Its sitemap's `magazine.xml` holds 1,684 URLs that are class listings
-and gift/party listicles ("birthday-dinner-in-NYC", "gifts-for-bakers",
-"beginner-painting-ideas"); the JSON-LD on those pages is `Article` +
-`WebPage` + `Organization`. Of 1,684 URLs, **zero** match `/recipe/`.
-
-Routing it to Phase 2's LLM extractor would be worse than dropping it: we would
-pay tokens per page to discover there is no recipe on the page. **Recommendation:
-seed Classpop with `enabled = false` and a comment, or drop it from the source
-list.** It was on the list from PROGRESS.md A3; the honest finding is that it
-does not belong there.
 
 ## Where PLAN.md is optimistic
 
-1. **"Those sites all expose RSS feeds and sitemaps" (§1).** Two of nine have
+1. **"Those sites all expose RSS feeds and sitemaps" (§1).** Two of eight have
    no usable feed: Serious Eats serves 404 at every conventional RSS path, and
    GypsyPlate's `/feed/` redirects to its homepage. The sitemap fallback is not
-   a nicety — it is load-bearing for 2/9 sources on day one.
+   a nicety — it is load-bearing for 2/8 sources on day one.
 2. **Feeds are round-up-heavy, not recipe-heavy.** All 10 Downshiftology feed
    items on capture day were listicles, as was 1 of 3 at Pinch of Yum and
    Skinnytaste. §1 anticipates junk ("cocktails, desserts") but frames it as a

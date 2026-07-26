@@ -481,9 +481,6 @@ describe('structural oddities in the real corpus', () => {
 
 describe('pages that carry no Recipe JSON-LD', () => {
   it.each([
-    ['classpop', 'page-1.html'],
-    ['classpop', 'page-2.html'],
-    ['classpop', 'page-3.html'],
     ['downshiftology', 'page-1.html'],
     ['downshiftology', 'page-2.html'],
     ['downshiftology', 'page-3.html'],
@@ -498,10 +495,9 @@ describe('pages that carry no Recipe JSON-LD', () => {
     expect(result.stats.blocks).toBeGreaterThan(0);
   });
 
-  it('finds Recipe JSON-LD on 21 of the 29 captured pages', () => {
+  it('finds Recipe JSON-LD on 21 of the 26 captured pages', () => {
     const manifests = [
       'budget-bytes',
-      'classpop',
       'downshiftology',
       'gypsyplate',
       'love-and-lemons',
@@ -518,7 +514,7 @@ describe('pages that carry no Recipe JSON-LD', () => {
       pages.map((page) => extract(site, page.file).found),
     );
 
-    expect(results).toHaveLength(29);
+    expect(results).toHaveLength(26);
     expect(results.filter(Boolean)).toHaveLength(21);
   });
 });

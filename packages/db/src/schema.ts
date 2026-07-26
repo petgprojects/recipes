@@ -87,8 +87,11 @@ export const sources = pgTable(
     name: text('name').notNull(),
     kind: sourceKindEnum('kind').notNull(),
     baseUrl: text('base_url').notNull(),
-    /** RSS or sitemap entry point. Null for sources discovered another way. */
+    /** Primary RSS/Atom entry point. Null for sitemap-only sources. */
     feedUrl: text('feed_url'),
+    /** Conditional-GET validators for the source's feed. */
+    feedEtag: text('feed_etag'),
+    feedLastModified: text('feed_last_modified'),
     enabled: boolean('enabled').notNull().default(true),
     /** Politeness delay between requests (PLAN.md §7). */
     crawlDelayS: integer('crawl_delay_s').notNull().default(2),
@@ -118,6 +121,9 @@ export const recipes = pgTable(
     sourceUrl: text('source_url').notNull(),
     /** Detects upstream edits, so a daily re-scan is idempotent. */
     contentHash: text('content_hash'),
+    /** Conditional-GET validators for the canonical recipe page. */
+    pageEtag: text('page_etag'),
+    pageLastModified: text('page_last_modified'),
 
     title: text('title').notNull(),
     slug: text('slug').notNull(),
@@ -424,6 +430,8 @@ export const scanRuns = pgTable(
     finishedAt: tstz('finished_at'),
     status: scanRunStatusEnum('status').notNull().default('running'),
     found: integer('found').notNull().default(0),
+    /** Fetched pages with no schema.org Recipe node (zero-token rejection). */
+    noRecipeCount: integer('no_recipe').notNull().default(0),
     /** Column is `new` per PLAN.md §4; the TS property avoids the keyword. */
     newCount: integer('new').notNull().default(0),
     tokensIn: integer('tokens_in').notNull().default(0),

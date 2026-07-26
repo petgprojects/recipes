@@ -311,6 +311,31 @@ describe('retries', () => {
 });
 
 describe('limits', () => {
+  it('returns exact binary bytes without text decoding and honours a request cap', async () => {
+    const bytes = Uint8Array.from([0, 255, 128, 13, 10]);
+    const fetchImpl = (async () =>
+      new Response(bytes, {
+        headers: { 'content-type': 'image/png' },
+      })) as unknown as typeof fetch;
+    const fetcher = new PoliteFetcher({
+      fetchImpl,
+      respectRobots: false,
+      maxBytes: 1_000,
+      sleep: async () => undefined,
+    });
+
+    const result = await fetcher.fetchBytes('https://example.com/image', { maxBytes: 10 });
+    expect(result.outcome).toBe('ok');
+    if (result.outcome === 'ok') {
+      expect([...result.body]).toEqual([...bytes]);
+      expect(result.contentType).toBe('image/png');
+    }
+
+    const capped = await fetcher.fetchBytes('https://example.com/image', { maxBytes: 4 });
+    expect(capped.outcome).toBe('error');
+    if (capped.outcome === 'error') expect(capped.reason).toBe('too-large');
+  });
+
   it('refuses a body larger than maxBytes', async () => {
     const fetchImpl = (async () => new Response('x'.repeat(5_000))) as unknown as typeof fetch;
     const fetcher = new PoliteFetcher({

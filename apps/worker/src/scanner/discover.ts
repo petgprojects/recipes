@@ -178,6 +178,8 @@ export interface DiscoverSource {
   readonly feedUrl?: string | null;
   /** `sources.base_url`. Used for sitemap fallback and URL resolution. */
   readonly baseUrl: string;
+  /** Source-specific sitemap roots to try before robots/conventional guesses. */
+  readonly sitemapUrls?: readonly string[];
   /** `sources.crawl_delay_s` in ms, if the source overrides it. */
   readonly crawlDelayMs?: number | null;
 }
@@ -250,9 +252,17 @@ export async function discoverSource(
     if (result.outcome === 'ok') {
       newEtag = result.etag;
       newLastModified = result.lastModified;
-      const items = parseFeed(result.body, source.baseUrl);
-      if (items.length === 0) warnings.push(`feed ${source.feedUrl} parsed to zero items`);
-      else via.push('feed');
+      const parsedItems = parseFeed(result.body, source.baseUrl);
+      const items = urlFilter
+        ? parsedItems.filter((item) => urlFilter(item.url))
+        : parsedItems;
+      if (parsedItems.length === 0) {
+        warnings.push(`feed ${source.feedUrl} parsed to zero items`);
+      } else if (items.length === 0) {
+        warnings.push(`feed ${source.feedUrl} contained no candidate recipe URLs`);
+      } else {
+        via.push('feed');
+      }
       collected = collected.concat(items);
     } else if (result.outcome === 'notModified') {
       feedUnchanged = true;
@@ -263,7 +273,11 @@ export async function discoverSource(
     }
   }
 
-  if (includeSitemap || collected.length === 0) {
+  // A 304 is a successful answer: the feed has not changed. Falling through
+  // to several sitemap requests here would defeat the conditional GET's main
+  // benefit on every routine scan. `includeSitemap` remains the explicit
+  // backfill escape hatch.
+  if (includeSitemap || (collected.length === 0 && !feedUnchanged)) {
     const fromSitemap = await discoverViaSitemap(fetcher, source, { since, maxSitemaps, warnings });
     if (fromSitemap.length > 0) via.push('sitemap');
     collected = collected.concat(fromSitemap);
@@ -296,7 +310,12 @@ async function discoverViaSitemap(
   // robots.txt is the authoritative list of a site's sitemaps; `/sitemap.xml`
   // and `/sitemap_index.xml` are the conventional fallbacks.
   const advertised = await fetcher.sitemapsFor(origin).catch(() => []);
-  const roots = dedupe([...advertised, `${origin}/sitemap_index.xml`, `${origin}/sitemap.xml`]);
+  const roots = dedupe([
+    ...(source.sitemapUrls ?? []),
+    ...advertised,
+    `${origin}/sitemap_index.xml`,
+    `${origin}/sitemap.xml`,
+  ]);
 
   const out: DiscoveredUrl[] = [];
   const queue = [...roots];
@@ -386,11 +405,14 @@ export function canonicalUrlKey(url: string): string {
     const parsed = new URL(url);
     parsed.hash = '';
     for (const key of [...parsed.searchParams.keys()]) {
-      if (/^(utm_|fbclid|gclid|mc_|ref$|source$)/i.test(key)) parsed.searchParams.delete(key);
+      if (/^(utm_|fbclid|gclid|mc_|adt_ei$|ref$|source$)/i.test(key)) {
+        parsed.searchParams.delete(key);
+      }
     }
     parsed.protocol = 'https:';
     parsed.hostname = parsed.hostname.replace(/^www\./i, '').toLowerCase();
     parsed.pathname = parsed.pathname.replace(/\/+$/, '') || '/';
+    parsed.searchParams.sort();
     return parsed.toString();
   } catch {
     return url;

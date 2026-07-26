@@ -143,6 +143,12 @@ describe('deduplication', () => {
     );
   });
 
+  it('sorts meaningful query parameters and removes Skinnytaste email tracking', () => {
+    expect(
+      canonicalUrlKey('https://www.example.com/a?b=2&adt_ei=*|EMAIL|*&a=1'),
+    ).toBe(canonicalUrlKey('https://example.com/a?a=1&b=2'));
+  });
+
   it('merges what each copy knows', () => {
     const merged = dedupeByUrl([
       { url: 'https://example.com/a/' },
@@ -172,11 +178,7 @@ describe('the real feeds we captured', () => {
     }
   });
 
-  it('parses the two sitemap-only sources', () => {
-    const classpop = parseSitemap(fixture('classpop', 'sitemap.xml'));
-    expect(classpop.kind).toBe('urlset');
-    if (classpop.kind === 'urlset') expect(classpop.urls.length).toBeGreaterThan(1_000);
-
+  it('parses the Serious Eats flat sitemap', () => {
     const seriousEats = parseSitemap(fixture('serious-eats', 'sitemap.xml'));
     expect(seriousEats.kind).toBe('urlset');
     if (seriousEats.kind === 'urlset') {
@@ -266,6 +268,32 @@ describe('discoverSource', () => {
     expect(result.warnings.some((w) => w.includes('feed'))).toBe(true);
   });
 
+  it('falls back to the sitemap when the source adapter rejects every feed URL', async () => {
+    const fetcher = stubFetcher({
+      'https://blog.test/robots.txt': {
+        body: 'Sitemap: https://blog.test/sitemap.xml\nUser-agent: *\nDisallow:\n',
+      },
+      'https://blog.test/feed/': { body: FEED },
+      'https://blog.test/sitemap.xml': {
+        body: `<urlset><url><loc>https://blog.test/recipes/a/</loc></url></urlset>`,
+      },
+    });
+
+    const result = await discoverSource(
+      fetcher,
+      { feedUrl: 'https://blog.test/feed/', baseUrl: 'https://blog.test' },
+      { urlFilter: (url) => new URL(url).pathname.startsWith('/recipes/') },
+    );
+
+    expect(result.via).toEqual(['sitemap']);
+    expect(result.urls.map((item) => item.url)).toEqual([
+      'https://blog.test/recipes/a/',
+    ]);
+    expect(result.warnings).toContain(
+      'feed https://blog.test/feed/ contained no candidate recipe URLs',
+    );
+  });
+
   it('skips child sitemaps whose lastmod predates the last scan', async () => {
     const fetcher = stubFetcher({
       'https://blog.test/robots.txt': { body: 'User-agent: *\nDisallow:\n' },
@@ -289,10 +317,14 @@ describe('discoverSource', () => {
   });
 
   it('reports a 304 feed as unchanged and keeps the stored validators', async () => {
-    const fetchImpl = (async (input: string | URL | Request) =>
-      String(input).endsWith('robots.txt')
+    const requests: string[] = [];
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = String(input);
+      requests.push(url);
+      return url.endsWith('robots.txt')
         ? new Response('User-agent: *\nDisallow:\n')
-        : new Response(null, { status: 304 })) as unknown as typeof fetch;
+        : new Response(null, { status: 304 });
+    }) as unknown as typeof fetch;
     const fetcher = new PoliteFetcher({ fetchImpl, sleep: async () => undefined, minDelayMs: 1 });
 
     const result = await discoverSource(
@@ -303,6 +335,10 @@ describe('discoverSource', () => {
 
     expect(result.feedUnchanged).toBe(true);
     expect(result.feedEtag).toBe('W/"kept"');
+    expect(requests).toEqual([
+      'https://blog.test/robots.txt',
+      'https://blog.test/feed/',
+    ]);
   });
 
   it('does not fetch a feed robots.txt disallows', async () => {

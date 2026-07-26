@@ -24,6 +24,7 @@ export * from './fetcher';
 export * from './robots';
 export * from './discover';
 export * from './jsonld';
+export * from './sources';
 export {
   absoluteUrl,
   cleanText,

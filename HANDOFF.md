@@ -20,31 +20,24 @@ truth for what is done. This file is the orientation layer that neither covers.
 
 Three commits, all on `main`. No remote configured. Working tree clean.
 
-**Phase 1 remaining** (checklist in `PROGRESS.md`): ingredient normalization,
-the insert path, the image pipeline, pg-boss + cron + `scan_runs`, seeding the
-`sources` table, and the `/ops` page. The library layer they build on
-(`apps/worker/src/scanner/`) is done and tested.
+**Phase 1 remaining** (checklist in `PROGRESS.md`): pg-boss + cron, scan
+orchestration/`scan_runs` telemetry, and the `/ops` page. Ingredient
+normalization, transactional recipe persistence, image caching, source seeding,
+and the scanner library layer are done and tested.
 
 Everything currently passes: `corepack pnpm typecheck` clean across 4 projects,
-`corepack pnpm test` → **336 passing** (shared 22, db 16, worker 298).
+`corepack pnpm test` → **405 passing** (shared 33, db 19, worker 353).
 
 ---
 
-## Two decisions waiting on Peter
+## Source decisions resolved
 
-Both are seeded-disabled either way, so neither blocks progress.
+Peter resolved both on 2026-07-26:
 
-1. **Serious Eats — the one that actually matters.** Its robots.txt disallows
-   named AI crawlers (`anthropic-ai`, `GPTBot`, `CCBot`, `PerplexityBot`) and
-   carries a People Inc. notice prohibiting text/data mining and LLM use. Our
-   crawler matches the `*` group, which *does* permit the recipe pages — so it
-   is technically allowed while the site's intent is plainly the opposite.
-   PLAN.md §7 commits this project to good-faith crawling; taking the `*` group
-   here would not be that. **Do not enable without Peter explicitly saying so.**
-   See `PROGRESS.md` amendment A7.
-2. **Classpop** is a cooking-class marketplace, not a recipe publisher — 1,684
-   magazine URLs, zero `Recipe` JSON-LD. Recommend dropping it from the source
-   list entirely. Amendment A6.
+1. **Serious Eats is enabled.** Peter confirmed permission and noted that the
+   crawl/extraction path is deterministic; later LLM analysis is separate.
+2. **Classpop is dropped entirely.** It is absent from the canonical source
+   config, seed, capture tooling, coverage report and fixture corpus.
 
 ## Credentials outstanding
 
@@ -52,9 +45,10 @@ Both are seeded-disabled either way, so neither blocks progress.
 Phase 2 can run against anything real (the code can be built and tested against
 mocks without it). **Reddit** credentials are blocked on a reCAPTCHA failure at
 reddit.com/prefs/apps — diagnosis and fixes are in `PROGRESS.md`; Reddit is one
-source adapter and blocks nothing. **Google OAuth** app not yet created; not
-needed until Phase 4, and step-by-step instructions were given in session 1
-(redirect URI must be exactly `http://localhost:3000/api/auth/callback/google`).
+source adapter and blocks nothing. **Google OAuth** client and test user are
+configured with the exact redirect
+`http://localhost:3000/api/auth/callback/google`; the client ID/secret and
+`AUTH_SECRET` still need to be copied into `.env` before Phase 4.
 
 ---
 
@@ -124,7 +118,7 @@ job and are *expected* to be null after Phase 1.
 
 Detail in `apps/worker/test/fixtures/COVERAGE.md`. The load-bearing bits:
 
-- **The sitemap fallback is not optional.** 2 of 9 sources have no usable RSS.
+- **The sitemap fallback is not optional.** 2 of 8 sources have no usable RSS.
 - **~1/3 of feed items are round-up posts** with no recipe. Absence of a Recipe
   node is a free zero-token filter — count it *separately* from Phase 2 gate
   rejections in `scan_runs` or the telemetry becomes unreadable.

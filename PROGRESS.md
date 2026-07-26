@@ -13,7 +13,12 @@ on Peter**.
 |---|---|---|
 | `OPENROUTER_API_KEY` | Phase 2 | ⬜ not yet provided |
 | Reddit API credentials | Phase 2 (Reddit source only) | ⛔ blocked — see below |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Phase 4 | ⬜ account exists, app not yet created |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Phase 4 | ◐ OAuth client + test user configured; values not yet copied into `.env` |
+
+Google OAuth is configured to redirect to the exact callback
+`http://localhost:3000/api/auth/callback/google`, and Peter's email is an
+allowed test user. The local `.env` entries are still blank; that does not
+block work before Phase 4.
 
 **Reddit blocker.** App creation at reddit.com/prefs/apps fails with the
 "Responsible Builder Policy" message; browser console shows a 401 from
@@ -72,21 +77,22 @@ safety net rather than the expected path. §2's "Alternative worth prototyping"
 — the `emit_recipe` tool-calling hack — is **not needed** and will not be built.
 
 ### A3 — Source list resolved (PLAN.md §8, open question 11)
-Budget Bytes, Pinch of Yum, Downshiftology, GypsyPlate, Classpop, Skinnytaste,
-The Kitchn, Love & Lemons, Serious Eats.
+Budget Bytes, Pinch of Yum, Downshiftology, GypsyPlate, Skinnytaste, The
+Kitchn, Love & Lemons, Serious Eats.
 
-### A6 — Classpop is not a recipe site; ship it `enabled = false`
-*Phase 1. Needs Peter's sign-off to drop permanently.*
+### A6 — Classpop dropped permanently
+*Phase 1. Resolved by Peter on 2026-07-26.*
 
 Probed live: Classpop's sitemap holds 1,684 magazine URLs, zero under
 `/recipe/`, and its pages emit only `Article` + `WebPage` JSON-LD — no
 `Recipe` node anywhere. It came from the artifact's source list, but it is a
 cooking-class marketplace, not a recipe publisher. Routing it to the Phase 2
 LLM extraction path would mean paying tokens to repeatedly discover there is no
-recipe on the page. Seeded disabled.
+recipe on the page. It has been removed from the canonical source list, capture
+tooling, coverage report, and committed fixture corpus.
 
-### A7 — Serious Eats: permitted by robots.txt, but its terms forbid this use
-*Phase 1. **Ships `enabled = false`. This is Peter's call, not mine.***
+### A7 — Serious Eats enabled
+*Phase 1. Resolved by Peter on 2026-07-26.*
 
 Serious Eats' robots.txt `Disallow: /`s the named AI crawlers
 (`anthropic-ai`, `GPTBot`, `CCBot`, `PerplexityBot`) and carries a People Inc.
@@ -94,10 +100,10 @@ licensing notice prohibiting text/data mining and LLM use. Our crawler matches
 the `*` group, which does not disallow recipe pages — so we are *technically*
 permitted while the site's stated intent is clearly the opposite.
 
-PLAN.md §7 commits this project to crawling politely and in good faith. Quietly
-taking the `*` group when a site has spelled out that it does not want this is
-not that. Seeded disabled pending an explicit decision. The adapter works and
-the fixtures are captured, so enabling it later is a one-boolean change.
+Peter confirmed the project is permitted to use the source and directed that
+it be enabled, noting that crawling/extraction is deterministic rather than
+LLM-driven; any later analysis is a separate Phase 2 concern. Serious Eats is
+therefore included in the canonical eight-source seed with `enabled = true`.
 
 ### A4 — Unset and empty env vars are treated identically
 *Phase 0. Found while bringing up compose from a clean state.*
@@ -130,10 +136,10 @@ removes it structurally.
     - [x] RSS + sitemap discovery
     - [x] JSON-LD → Recipe extraction, 30 committed fixtures, coverage report
     - [x] Ingredient normalization (parse → match → alias writeback, stages 1–2)
-    - [ ] Insert path + dedupe on `source_url` + `content_hash`
-    - [ ] Image pipeline (fetch once, downscale ~800px, `recipe-images` volume)
+    - [x] Insert path + dedupe on `source_url` + `content_hash`
+    - [x] Image pipeline (fetch once, downscale ~800px, `recipe-images` volume)
     - [ ] pg-boss wiring, cron + advisory lock, `scan_runs` telemetry
-    - [ ] `sources` seeded (9 sites; Classpop + Serious Eats disabled — A6, A7)
+    - [x] `sources` seeded (8 approved blogs, all enabled — A6, A7)
     - [ ] `/ops` page: last run, counts, cost
       *Exit: hundreds of real recipes with photos, zero LLM involvement.*
 - [ ] **Phase 2 — LLM enrichment.** OpenRouter client, suitability gate,
@@ -214,3 +220,23 @@ Verification: 47 focused parser/matcher tests, 345 worker tests and 383 tests
 workspace-wide pass; all workspace typechecks pass. A live Postgres probe
 confirmed both exact matching (`Chicken Breast`) and fuzzy alias learning
 (`Chicken Breasts` → `chicken breast`) against the seeded rows.
+
+### 2026-07-26 — Phase 1, storage + images + source decisions
+The source list now has exactly eight enabled blogs. Classpop is removed
+entirely; Serious Eats is enabled. The same typed source configuration drives
+database seeding, scanner URL adapters and fixture capture, so those surfaces
+cannot silently drift.
+
+Added persisted feed/page conditional-GET validators and a separate
+`scan_runs.no_recipe` counter, transactional recipe upserts with canonical URL
+dedupe and content-hash-aware ingredient replacement, and a binary-safe Sharp
+image cache. Images are fetched through the polite crawler, bounded by byte and
+pixel limits, auto-oriented, resized within 800×800 without enlargement, and
+atomically stored as deterministic WebP files. Image failures degrade without
+losing the recipe or its source-image attribution.
+
+Verification: migration + idempotent seed pass against Postgres; the database
+contains 8/8 enabled sources and no Classpop row. Live integration tests cover
+insert, unchanged touch, changed-content replacement, rollback and 304
+semantics. Workspace totals: shared 33, db 19 and worker 353 tests passing;
+typecheck and the 26-page fixture coverage report pass.

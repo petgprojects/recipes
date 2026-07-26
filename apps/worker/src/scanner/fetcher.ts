@@ -81,6 +81,8 @@ export interface FetchRequest {
   crawlDelayMs?: number | null;
   /** Skip the robots.txt check for this one request (used to fetch robots). */
   skipRobots?: boolean;
+  /** Per-request cap, clamped to the fetcher's configured maximum. */
+  maxBytes?: number;
 }
 
 export interface FetchOk {
@@ -96,6 +98,10 @@ export interface FetchOk {
   readonly bytes: number;
   readonly attempts: number;
   readonly fetchedAt: Date;
+}
+
+export interface FetchBytesOk extends Omit<FetchOk, 'body'> {
+  readonly body: Buffer;
 }
 
 export interface FetchNotModified {
@@ -129,6 +135,7 @@ export interface FetchError {
 }
 
 export type FetchResult = FetchOk | FetchNotModified | FetchError;
+export type FetchBytesResult = FetchBytesOk | FetchNotModified | FetchError;
 
 interface RobotsCacheEntry {
   robots: RobotsTxt;
@@ -187,6 +194,24 @@ export class PoliteFetcher {
    * only way this rejects is a bug in the fetcher itself.
    */
   async fetch(url: string, request: FetchRequest = {}): Promise<FetchResult> {
+    const result = await this.fetchRaw(url, request);
+    if (result.outcome !== 'ok') return result;
+    return {
+      ...result,
+      body: decodeBuffer(result.body, charsetOf(result.contentType)),
+    };
+  }
+
+  /**
+   * Binary counterpart used for recipe images. It shares the same robots
+   * checks, identification, per-origin queue, delays, retries, timeouts and
+   * byte cap as HTML fetching; image bytes are never decoded through a string.
+   */
+  async fetchBytes(url: string, request: FetchRequest = {}): Promise<FetchBytesResult> {
+    return this.fetchRaw(url, request);
+  }
+
+  private async fetchRaw(url: string, request: FetchRequest): Promise<FetchBytesResult> {
     let parsed: URL;
     try {
       parsed = new URL(url);
@@ -217,7 +242,7 @@ export class PoliteFetcher {
     }
 
     const delayMs = await this.delayForOrigin(origin, request.crawlDelayMs);
-    return this.enqueue(origin, delayMs, () => this.attempt(url, request));
+    return this.enqueue(origin, delayMs, () => this.attemptRaw(url, request));
   }
 
   /** Is this URL crawlable? Exposed so discovery can filter before queueing. */
@@ -260,9 +285,16 @@ export class PoliteFetcher {
     // robots.txt itself is fetched with the same politeness (delay, timeout,
     // retries) but obviously without a robots check.
     const delayMs = await this.delayForOrigin(origin, null);
-    const result = await this.enqueue(origin, delayMs, () =>
-      this.attempt(url, { skipRobots: true, accept: 'text/plain,*/*;q=0.8' }),
+    const rawResult = await this.enqueue(origin, delayMs, () =>
+      this.attemptRaw(url, { skipRobots: true, accept: 'text/plain,*/*;q=0.8' }),
     );
+    const result: FetchResult =
+      rawResult.outcome === 'ok'
+        ? {
+            ...rawResult,
+            body: decodeBuffer(rawResult.body, charsetOf(rawResult.contentType)),
+          }
+        : rawResult;
 
     let entry: RobotsCacheEntry;
     if (result.outcome === 'ok') {
@@ -330,7 +362,7 @@ export class PoliteFetcher {
   }
 
   /** One URL, up to `maxAttempts` HTTP attempts with backoff between them. */
-  private async attempt(url: string, request: FetchRequest): Promise<FetchResult> {
+  private async attemptRaw(url: string, request: FetchRequest): Promise<FetchBytesResult> {
     let lastError: FetchError = errorResult(url, 'network', null, 'no attempt made', 0, true);
 
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
@@ -359,7 +391,7 @@ export class PoliteFetcher {
     url: string,
     request: FetchRequest,
     attempt: number,
-  ): Promise<FetchOk | FetchNotModified | (FetchError & { retryAfterMs: number | null })> {
+  ): Promise<FetchBytesOk | FetchNotModified | (FetchError & { retryAfterMs: number | null })> {
     const headers: Record<string, string> = {
       'user-agent': this.userAgent,
       accept: request.accept ?? 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -407,15 +439,23 @@ export class PoliteFetcher {
         };
       }
 
+      const maxBytes = Math.min(
+        this.maxBytes,
+        typeof request.maxBytes === 'number' &&
+          Number.isFinite(request.maxBytes) &&
+          request.maxBytes > 0
+          ? Math.floor(request.maxBytes)
+          : this.maxBytes,
+      );
       const declared = Number.parseInt(response.headers.get('content-length') ?? '', 10);
-      if (Number.isFinite(declared) && declared > this.maxBytes) {
+      if (Number.isFinite(declared) && declared > maxBytes) {
         await discardBody(response);
         return {
           ...errorResult(
             url,
             'too-large',
             response.status,
-            `content-length ${declared} exceeds ${this.maxBytes}`,
+            `content-length ${declared} exceeds ${maxBytes}`,
             attempt,
             false,
           ),
@@ -423,10 +463,10 @@ export class PoliteFetcher {
         };
       }
 
-      const read = await readCapped(response, this.maxBytes);
+      const read = await readCapped(response, maxBytes);
       if (read === null) {
         return {
-          ...errorResult(url, 'too-large', response.status, `body exceeds ${this.maxBytes} bytes`, attempt, false),
+          ...errorResult(url, 'too-large', response.status, `body exceeds ${maxBytes} bytes`, attempt, false),
           retryAfterMs: null,
         };
       }
@@ -436,7 +476,7 @@ export class PoliteFetcher {
         url,
         finalUrl: response.url || url,
         statusCode: response.status,
-        body: read.text,
+        body: read.buffer,
         etag,
         lastModified,
         contentType: response.headers.get('content-type'),
@@ -500,12 +540,11 @@ export function parseRetryAfter(value: string | null, nowMs: number): number | n
 async function readCapped(
   response: Response,
   maxBytes: number,
-): Promise<{ text: string; bytes: number } | null> {
+): Promise<{ buffer: Buffer; bytes: number } | null> {
   const body = response.body;
   if (!body) {
-    const text = await response.text();
-    const bytes = Buffer.byteLength(text);
-    return bytes > maxBytes ? null : { text, bytes };
+    const buffer = Buffer.from(await response.arrayBuffer());
+    return buffer.byteLength > maxBytes ? null : { buffer, bytes: buffer.byteLength };
   }
 
   const reader = body.getReader();
@@ -527,9 +566,8 @@ async function readCapped(
     reader.releaseLock?.();
   }
 
-  const charset = charsetOf(response.headers.get('content-type'));
   const buffer = Buffer.concat(chunks);
-  return { text: decodeBuffer(buffer, charset), bytes };
+  return { buffer, bytes };
 }
 
 function charsetOf(contentType: string | null): string {

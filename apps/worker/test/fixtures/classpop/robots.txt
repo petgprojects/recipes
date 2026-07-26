@@ -1,4 +1,0 @@
-User-agent: *
-Disallow: /legal/*
-Disallow: /book/*
-Sitemap: https://www.classpop.com/sitemap.xml

@@ -1,0 +1,53 @@
+{
+  "site": "the-kitchn",
+  "name": "The Kitchn",
+  "baseUrl": "https://www.thekitchn.com",
+  "capturedAt": "2026-07-26T18:45:41.237Z",
+  "userAgent": "RecipePlannerBot/0.1 (+https://github.com/petergelgor/recipes)",
+  "feedUrl": "https://www.thekitchn.com/main.rss",
+  "feedFile": "feed.xml",
+  "feedItems": 20,
+  "feedError": null,
+  "sitemapUrl": null,
+  "sitemapFile": null,
+  "sitemapUrls": 0,
+  "discoveredVia": "feed",
+  "robotsFile": "robots.txt",
+  "robotsStatus": "ok 200",
+  "robotsCrawlDelayS": null,
+  "robotsDisallowedSample": [
+    "/search?"
+  ],
+  "pages": [
+    {
+      "file": "page-1.html",
+      "url": "https://www.thekitchn.com/caribbean-cowboy-caviar-recipe-review-23791557?utm_source=RSS&utm_medium=feed&utm_campaign=Category%2FChannel%3A+main",
+      "title": "Monti Carlo’s Caribbean Cowboy Caviar",
+      "publishedAt": "2026-07-26T18:00:00.000Z",
+      "finalUrl": "https://www.thekitchn.com/caribbean-cowboy-caviar-recipe-review-23791557?utm_source=RSS&utm_medium=feed&utm_campaign=Category%2FChannel%3A+main",
+      "statusCode": 200,
+      "bytes": 581111,
+      "storedBytes": 200138
+    },
+    {
+      "file": "page-2.html",
+      "url": "https://www.thekitchn.com/kalua-pork-recipe-23791234?utm_source=RSS&utm_medium=feed&utm_campaign=Category%2FChannel%3A+main",
+      "title": "Kalua Pork",
+      "publishedAt": "2026-07-26T17:00:00.000Z",
+      "finalUrl": "https://www.thekitchn.com/kalua-pork-recipe-23791234?utm_source=RSS&utm_medium=feed&utm_campaign=Category%2FChannel%3A+main",
+      "statusCode": 200,
+      "bytes": 531365,
+      "storedBytes": 188786
+    },
+    {
+      "file": "page-3.html",
+      "url": "https://www.thekitchn.com/frozen-peanut-butter-bars-recipe-23791179?utm_source=RSS&utm_medium=feed&utm_campaign=Category%2FChannel%3A+main",
+      "title": "Frozen Peanut Butter Bars",
+      "publishedAt": "2026-07-26T16:00:00.000Z",
+      "finalUrl": "https://www.thekitchn.com/frozen-peanut-butter-bars-recipe-23791179?utm_source=RSS&utm_medium=feed&utm_campaign=Category%2FChannel%3A+main",
+      "statusCode": 200,
+      "bytes": 508922,
+      "storedBytes": 173455
+    }
+  ]
+}

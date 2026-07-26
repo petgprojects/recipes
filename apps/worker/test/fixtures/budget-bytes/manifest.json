@@ -1,0 +1,61 @@
+{
+  "site": "budget-bytes",
+  "name": "Budget Bytes",
+  "baseUrl": "https://www.budgetbytes.com",
+  "capturedAt": "2026-07-26T18:44:54.416Z",
+  "userAgent": "RecipePlannerBot/0.1 (+https://github.com/petergelgor/recipes)",
+  "feedUrl": "https://www.budgetbytes.com/feed/",
+  "feedFile": "feed.xml",
+  "feedItems": 10,
+  "feedError": null,
+  "sitemapUrl": null,
+  "sitemapFile": null,
+  "sitemapUrls": 0,
+  "discoveredVia": "feed",
+  "robotsFile": "robots.txt",
+  "robotsStatus": "ok 200",
+  "robotsCrawlDelayS": null,
+  "robotsDisallowedSample": [
+    "/wp-admin/",
+    "/wp-login.php",
+    "/cdn-cgi/",
+    "/search/*",
+    "/?s*",
+    "/login/*",
+    "/wp-content/themes/budgetbytes-2022/assets/icons/utility/*.svg$",
+    "/wp-content/themes/budgetbytes-2022/assets/icons/color/*.svg$",
+    "/wp-content/themes/budgetbytes-2022/assets/icons/blocks/*.svg$"
+  ],
+  "pages": [
+    {
+      "file": "page-1.html",
+      "url": "https://www.budgetbytes.com/easy-kale-salad/",
+      "title": "Easy Kale Salad",
+      "publishedAt": "2026-07-25T13:30:00.000Z",
+      "finalUrl": "https://www.budgetbytes.com/easy-kale-salad/",
+      "statusCode": 200,
+      "bytes": 993239,
+      "storedBytes": 367471
+    },
+    {
+      "file": "page-2.html",
+      "url": "https://www.budgetbytes.com/bruschetta-chicken/",
+      "title": "Bruschetta Chicken",
+      "publishedAt": "2026-07-24T13:30:00.000Z",
+      "finalUrl": "https://www.budgetbytes.com/bruschetta-chicken/",
+      "statusCode": 200,
+      "bytes": 867039,
+      "storedBytes": 249910
+    },
+    {
+      "file": "page-3.html",
+      "url": "https://www.budgetbytes.com/baked-chicken-drumsticks/",
+      "title": "Baked Chicken Drumsticks",
+      "publishedAt": "2026-07-22T13:30:00.000Z",
+      "finalUrl": "https://www.budgetbytes.com/baked-chicken-drumsticks/",
+      "statusCode": 200,
+      "bytes": 963472,
+      "storedBytes": 326992
+    }
+  ]
+}

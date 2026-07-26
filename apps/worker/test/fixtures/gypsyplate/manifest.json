@@ -1,0 +1,57 @@
+{
+  "site": "gypsyplate",
+  "name": "GypsyPlate",
+  "baseUrl": "https://gypsyplate.com",
+  "capturedAt": "2026-07-26T18:49:52.650Z",
+  "userAgent": "RecipePlannerBot/0.1 (+https://github.com/petergelgor/recipes)",
+  "feedUrl": null,
+  "feedFile": null,
+  "feedItems": 0,
+  "feedError": "https://gypsyplate.com/feed/: HTTP 200 but parsed to zero items",
+  "sitemapUrl": "https://gypsyplate.com/post-sitemap.xml",
+  "sitemapFile": "sitemap.xml",
+  "sitemapUrls": 923,
+  "discoveredVia": "sitemap",
+  "robotsFile": "robots.txt",
+  "robotsStatus": "ok 200",
+  "robotsCrawlDelayS": null,
+  "robotsDisallowedSample": [
+    "/cdn-cgi/",
+    "/wp-admin/",
+    "/wp-json/",
+    "/*?s=",
+    "/*?attachment_id=",
+    "/*?add-to-cart=",
+    "/*&add-to-cart=",
+    "/mvscripts/"
+  ],
+  "pages": [
+    {
+      "file": "page-1.html",
+      "url": "https://gypsyplate.com/summer-detox-chicken-buddha-bowl/",
+      "publishedAt": "2019-10-19T13:58:22.000Z",
+      "finalUrl": "https://gypsyplate.com/summer-detox-chicken-buddha-bowl/",
+      "statusCode": 200,
+      "bytes": 236416,
+      "storedBytes": 124926
+    },
+    {
+      "file": "page-2.html",
+      "url": "https://gypsyplate.com/greek-steak-salad-bowl/",
+      "publishedAt": "2019-12-28T17:10:27.000Z",
+      "finalUrl": "https://gypsyplate.com/greek-steak-salad-bowl/",
+      "statusCode": 200,
+      "bytes": 226005,
+      "storedBytes": 114517
+    },
+    {
+      "file": "page-3.html",
+      "url": "https://gypsyplate.com/easy-baked-sweet-potato-fries/",
+      "publishedAt": "2020-08-29T21:44:26.000Z",
+      "finalUrl": "https://gypsyplate.com/easy-baked-sweet-potato-fries/",
+      "statusCode": 200,
+      "bytes": 243428,
+      "storedBytes": 131763
+    }
+  ]
+}

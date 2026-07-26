@@ -1,0 +1,53 @@
+{
+  "site": "love-and-lemons",
+  "name": "Love & Lemons",
+  "baseUrl": "https://www.loveandlemons.com",
+  "capturedAt": "2026-07-26T18:45:48.815Z",
+  "userAgent": "RecipePlannerBot/0.1 (+https://github.com/petergelgor/recipes)",
+  "feedUrl": "https://www.loveandlemons.com/feed/",
+  "feedFile": "feed.xml",
+  "feedItems": 10,
+  "feedError": null,
+  "sitemapUrl": null,
+  "sitemapFile": null,
+  "sitemapUrls": 0,
+  "discoveredVia": "feed",
+  "robotsFile": "robots.txt",
+  "robotsStatus": "ok 200",
+  "robotsCrawlDelayS": null,
+  "robotsDisallowedSample": [
+    "/wp-admin/"
+  ],
+  "pages": [
+    {
+      "file": "page-1.html",
+      "url": "https://www.loveandlemons.com/peach-crisp/",
+      "title": "Peach Crisp",
+      "publishedAt": "2026-07-26T13:26:25.000Z",
+      "finalUrl": "https://www.loveandlemons.com/peach-crisp/",
+      "statusCode": 200,
+      "bytes": 568386,
+      "storedBytes": 128638
+    },
+    {
+      "file": "page-2.html",
+      "url": "https://www.loveandlemons.com/caprese-gnocchi/",
+      "title": "Caprese Gnocchi",
+      "publishedAt": "2026-07-23T13:03:33.000Z",
+      "finalUrl": "https://www.loveandlemons.com/caprese-gnocchi/",
+      "statusCode": 200,
+      "bytes": 554196,
+      "storedBytes": 113994
+    },
+    {
+      "file": "page-3.html",
+      "url": "https://www.loveandlemons.com/whipped-cottage-cheese/",
+      "title": "Whipped Cottage Cheese",
+      "publishedAt": "2026-07-21T12:58:06.000Z",
+      "finalUrl": "https://www.loveandlemons.com/whipped-cottage-cheese/",
+      "statusCode": 200,
+      "bytes": 553310,
+      "storedBytes": 112667
+    }
+  ]
+}

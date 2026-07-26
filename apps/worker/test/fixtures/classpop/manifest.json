@@ -1,0 +1,48 @@
+{
+  "site": "classpop",
+  "name": "Classpop",
+  "baseUrl": "https://www.classpop.com",
+  "capturedAt": "2026-07-26T18:45:21.373Z",
+  "userAgent": "RecipePlannerBot/0.1 (+https://github.com/petergelgor/recipes)",
+  "feedUrl": null,
+  "feedFile": null,
+  "feedItems": 0,
+  "feedError": "https://www.classpop.com/blog/feed: http HTTP 404",
+  "sitemapUrl": "https://www.classpop.com/sitemap_files/magazine.xml",
+  "sitemapFile": "sitemap.xml",
+  "sitemapUrls": 1684,
+  "discoveredVia": "sitemap",
+  "robotsFile": "robots.txt",
+  "robotsStatus": "ok 200",
+  "robotsCrawlDelayS": null,
+  "robotsDisallowedSample": [
+    "/legal/*",
+    "/book/*"
+  ],
+  "pages": [
+    {
+      "file": "page-1.html",
+      "url": "https://www.classpop.com/magazine/virtual-dinner-party",
+      "finalUrl": "https://www.classpop.com/magazine/virtual-dinner-party",
+      "statusCode": 200,
+      "bytes": 303425,
+      "storedBytes": 212192
+    },
+    {
+      "file": "page-2.html",
+      "url": "https://www.classpop.com/online/cooking-classes/zoom",
+      "finalUrl": "https://www.classpop.com/online/cooking-classes/zoom",
+      "statusCode": 200,
+      "bytes": 289386,
+      "storedBytes": 207678
+    },
+    {
+      "file": "page-3.html",
+      "url": "https://www.classpop.com/magazine/birthday-dinner-in-NYC",
+      "finalUrl": "https://www.classpop.com/magazine/birthday-dinner-in-NYC",
+      "statusCode": 200,
+      "bytes": 312445,
+      "storedBytes": 221277
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+User-agent: *
+Disallow: /wp-admin/
+Disallow: /wp-login.php
+Disallow: /cdn-cgi/
+Disallow: /search/*
+Disallow: /?s*
+Disallow: /login/*
+Disallow: /wp-content/themes/budgetbytes-2022/assets/icons/utility/*.svg$
+Disallow: /wp-content/themes/budgetbytes-2022/assets/icons/color/*.svg$
+Disallow: /wp-content/themes/budgetbytes-2022/assets/icons/blocks/*.svg$
+
+User-agent: AdsBot-Google
+Allow: /
+User-agent: AmazonAdBot
+Allow: /
+User-agent: Bidswitchbot
+Allow: /
+User-agent: CriteoBot
+Allow: /
+User-agent: DoubleVerifyBot
+Allow: /
+User-agent: DVBot
+Allow: /
+User-agent: Grapeshot
+Allow: /
+User-agent: Gumgum
+Allow: /
+User-agent: IAS_admantx
+Allow: /
+User-agent: IAS_crawler
+Allow: /
+User-agent: IAS_wombles
+Allow: /
+User-agent: Leikibot
+Allow: /
+User-agent: Mediapartners-Google
+Allow: /
+User-agent: Opebot-v
+Allow: /
+User-agent: Peer39_crawler
+Allow: /
+User-agent: Proximic
+Allow: /
+User-agent: PubMatic Crawler Bot
+Allow: /
+User-agent: SinceraSyntheticUser
+Allow: /
+User-agent: SlickBot
+Allow: /
+User-agent: TTD-Content
+Allow: /
+
+
+user-agent: Pinterestbot
+Crawl-delay: 0.2
+
+Sitemap: https://www.budgetbytes.com/sitemap_index.xml

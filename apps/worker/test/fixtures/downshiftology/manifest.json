@@ -1,0 +1,69 @@
+{
+  "site": "downshiftology",
+  "name": "Downshiftology",
+  "baseUrl": "https://downshiftology.com",
+  "capturedAt": "2026-07-26T18:48:27.878Z",
+  "userAgent": "RecipePlannerBot/0.1 (+https://github.com/petergelgor/recipes)",
+  "feedUrl": "https://downshiftology.com/feed/",
+  "feedFile": "feed.xml",
+  "feedItems": 10,
+  "feedError": null,
+  "sitemapUrl": null,
+  "sitemapFile": null,
+  "sitemapUrls": 0,
+  "discoveredVia": "feed",
+  "robotsFile": "robots.txt",
+  "robotsStatus": "ok 200",
+  "robotsCrawlDelayS": null,
+  "robotsDisallowedSample": [],
+  "pages": [
+    {
+      "file": "page-1.html",
+      "url": "https://downshiftology.com/salads-that-eat-like-a-meal/",
+      "title": "14 Salads That Eat Like A Meal",
+      "publishedAt": "2026-07-16T00:09:44.000Z",
+      "finalUrl": "https://downshiftology.com/salads-that-eat-like-a-meal/",
+      "statusCode": 200,
+      "bytes": 521567,
+      "storedBytes": 269255
+    },
+    {
+      "file": "page-2.html",
+      "url": "https://downshiftology.com/what-to-cook-in-july/",
+      "title": "What To Cook In July",
+      "publishedAt": "2026-06-27T02:23:55.000Z",
+      "finalUrl": "https://downshiftology.com/what-to-cook-in-july/",
+      "statusCode": 200,
+      "bytes": 516732,
+      "storedBytes": 266776
+    },
+    {
+      "file": "page-3.html",
+      "url": "https://downshiftology.com/july-4th-recipes/",
+      "title": "40+ Best 4th of July Recipes for BBQ’s and Summer Cookouts",
+      "publishedAt": "2026-06-23T22:55:43.000Z",
+      "finalUrl": "https://downshiftology.com/july-4th-recipes/",
+      "statusCode": 200,
+      "bytes": 867523,
+      "storedBytes": 587604
+    },
+    {
+      "file": "page-4.html",
+      "url": "https://downshiftology.com/recipes/chicken-piccata/",
+      "probe": true,
+      "finalUrl": "https://downshiftology.com/recipes/chicken-piccata/",
+      "statusCode": 200,
+      "bytes": 558658,
+      "storedBytes": 295106
+    },
+    {
+      "file": "page-5.html",
+      "url": "https://downshiftology.com/recipes/greek-baked-cod/",
+      "probe": true,
+      "finalUrl": "https://downshiftology.com/recipes/greek-baked-cod/",
+      "statusCode": 200,
+      "bytes": 528790,
+      "storedBytes": 264453
+    }
+  ]
+}

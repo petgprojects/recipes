@@ -1,0 +1,55 @@
+{
+  "site": "pinch-of-yum",
+  "name": "Pinch of Yum",
+  "baseUrl": "https://pinchofyum.com",
+  "capturedAt": "2026-07-26T18:45:02.036Z",
+  "userAgent": "RecipePlannerBot/0.1 (+https://github.com/petergelgor/recipes)",
+  "feedUrl": "https://pinchofyum.com/feed",
+  "feedFile": "feed.xml",
+  "feedItems": 6,
+  "feedError": null,
+  "sitemapUrl": null,
+  "sitemapFile": null,
+  "sitemapUrls": 0,
+  "discoveredVia": "feed",
+  "robotsFile": "robots.txt",
+  "robotsStatus": "ok 200",
+  "robotsCrawlDelayS": null,
+  "robotsDisallowedSample": [
+    "/wp-admin/",
+    "/search/",
+    "/?s=*"
+  ],
+  "pages": [
+    {
+      "file": "page-1.html",
+      "url": "https://pinchofyum.com/easy-strawberry-pie",
+      "title": "Easy Strawberry Pie",
+      "publishedAt": "2026-06-30T09:00:00.000Z",
+      "finalUrl": "https://pinchofyum.com/easy-strawberry-pie",
+      "statusCode": 200,
+      "bytes": 339750,
+      "storedBytes": 225961
+    },
+    {
+      "file": "page-2.html",
+      "url": "https://pinchofyum.com/healthy-summer-dinners",
+      "title": "45 Light + Bright Healthy Summer Dinners",
+      "publishedAt": "2026-06-26T09:00:00.000Z",
+      "finalUrl": "https://pinchofyum.com/healthy-summer-dinners",
+      "statusCode": 200,
+      "bytes": 333458,
+      "storedBytes": 223434
+    },
+    {
+      "file": "page-3.html",
+      "url": "https://pinchofyum.com/chicken-caesar-smash-tacos",
+      "title": "Chicken Caesar Smash Tacos",
+      "publishedAt": "2026-06-18T14:54:33.000Z",
+      "finalUrl": "https://pinchofyum.com/chicken-caesar-smash-tacos",
+      "statusCode": 200,
+      "bytes": 337894,
+      "storedBytes": 236820
+    }
+  ]
+}

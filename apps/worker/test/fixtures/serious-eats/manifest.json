@@ -1,0 +1,51 @@
+{
+  "site": "serious-eats",
+  "name": "Serious Eats",
+  "baseUrl": "https://www.seriouseats.com",
+  "capturedAt": "2026-07-26T18:48:42.566Z",
+  "userAgent": "RecipePlannerBot/0.1 (+https://github.com/petergelgor/recipes)",
+  "feedUrl": null,
+  "feedFile": null,
+  "feedItems": 0,
+  "feedError": "https://www.seriouseats.com/feeds/all.rss: http HTTP 404",
+  "sitemapUrl": "https://www.seriouseats.com/sitemap_1.xml",
+  "sitemapFile": "sitemap.xml",
+  "sitemapUrls": 14460,
+  "discoveredVia": "sitemap",
+  "robotsFile": "robots.txt",
+  "robotsStatus": "ok 200",
+  "robotsCrawlDelayS": null,
+  "robotsDisallowedSample": [
+    "/embed?",
+    "/cdn-cgi/"
+  ],
+  "pages": [
+    {
+      "file": "page-1.html",
+      "url": "https://www.seriouseats.com/vermouth-preparado-recipe-12026637",
+      "publishedAt": "2026-07-24T23:00:00.000Z",
+      "finalUrl": "https://www.seriouseats.com/vermouth-preparado-recipe-12026637",
+      "statusCode": 200,
+      "bytes": 440828,
+      "storedBytes": 278316
+    },
+    {
+      "file": "page-2.html",
+      "url": "https://www.seriouseats.com/smoky-shrimp-with-chorizo-tomato-sauce-recipe-12026043",
+      "publishedAt": "2026-07-24T19:00:00.000Z",
+      "finalUrl": "https://www.seriouseats.com/smoky-shrimp-with-chorizo-tomato-sauce-recipe-12026043",
+      "statusCode": 200,
+      "bytes": 446757,
+      "storedBytes": 283960
+    },
+    {
+      "file": "page-3.html",
+      "url": "https://www.seriouseats.com/grilled-watermelon-spicy-recipe-12026037",
+      "publishedAt": "2026-07-24T10:30:00.000Z",
+      "finalUrl": "https://www.seriouseats.com/grilled-watermelon-spicy-recipe-12026037",
+      "statusCode": 200,
+      "bytes": 448444,
+      "storedBytes": 285648
+    }
+  ]
+}

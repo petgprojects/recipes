@@ -1,0 +1,53 @@
+{
+  "site": "skinnytaste",
+  "name": "Skinnytaste",
+  "baseUrl": "https://www.skinnytaste.com",
+  "capturedAt": "2026-07-26T18:45:33.656Z",
+  "userAgent": "RecipePlannerBot/0.1 (+https://github.com/petergelgor/recipes)",
+  "feedUrl": "https://www.skinnytaste.com/feed/",
+  "feedFile": "feed.xml",
+  "feedItems": 10,
+  "feedError": null,
+  "sitemapUrl": null,
+  "sitemapFile": null,
+  "sitemapUrls": 0,
+  "discoveredVia": "feed",
+  "robotsFile": "robots.txt",
+  "robotsStatus": "ok 200",
+  "robotsCrawlDelayS": null,
+  "robotsDisallowedSample": [
+    "/wp-admin/"
+  ],
+  "pages": [
+    {
+      "file": "page-1.html",
+      "url": "https://www.skinnytaste.com/shrimp-and-pineapple-skewers/?adt_ei=*|EMAIL|*",
+      "title": "Shrimp and Pineapple Skewers",
+      "publishedAt": "2026-07-26T16:27:25.000Z",
+      "finalUrl": "https://www.skinnytaste.com/shrimp-and-pineapple-skewers/?adt_ei=*|EMAIL|*",
+      "statusCode": 200,
+      "bytes": 656135,
+      "storedBytes": 267311
+    },
+    {
+      "file": "page-2.html",
+      "url": "https://www.skinnytaste.com/7-day-high-protein-diet-meal-plan-49/?adt_ei=*|EMAIL|*",
+      "title": "7 Day High Protein Diet Meal Plan",
+      "publishedAt": "2026-07-24T15:55:00.000Z",
+      "finalUrl": "https://www.skinnytaste.com/7-day-high-protein-diet-meal-plan-49/?adt_ei=*|EMAIL|*",
+      "statusCode": 200,
+      "bytes": 572503,
+      "storedBytes": 207727
+    },
+    {
+      "file": "page-3.html",
+      "url": "https://www.skinnytaste.com/zucchini-and-feta-fritters/?adt_ei=*|EMAIL|*",
+      "title": "Zucchini Fritters With Feta and Mint",
+      "publishedAt": "2026-07-22T17:01:17.000Z",
+      "finalUrl": "https://www.skinnytaste.com/zucchini-and-feta-fritters/?adt_ei=*|EMAIL|*",
+      "statusCode": 200,
+      "bytes": 669633,
+      "storedBytes": 271778
+    }
+  ]
+}

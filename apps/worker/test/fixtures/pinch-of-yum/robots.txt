@@ -1,0 +1,11 @@
+User-agent: *
+Disallow: /wp-admin/
+Disallow: /search/
+Disallow: /?s=*
+
+Sitemap: https://pinchofyum.com/sitemap_index.xml
+
+User-agent: SemrushBot
+Disallow: /
+User-agent: dotbot
+Disallow: /

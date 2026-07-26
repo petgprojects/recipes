@@ -75,6 +75,30 @@ safety net rather than the expected path. §2's "Alternative worth prototyping"
 Budget Bytes, Pinch of Yum, Downshiftology, GypsyPlate, Classpop, Skinnytaste,
 The Kitchn, Love & Lemons, Serious Eats.
 
+### A6 — Classpop is not a recipe site; ship it `enabled = false`
+*Phase 1. Needs Peter's sign-off to drop permanently.*
+
+Probed live: Classpop's sitemap holds 1,684 magazine URLs, zero under
+`/recipe/`, and its pages emit only `Article` + `WebPage` JSON-LD — no
+`Recipe` node anywhere. It came from the artifact's source list, but it is a
+cooking-class marketplace, not a recipe publisher. Routing it to the Phase 2
+LLM extraction path would mean paying tokens to repeatedly discover there is no
+recipe on the page. Seeded disabled.
+
+### A7 — Serious Eats: permitted by robots.txt, but its terms forbid this use
+*Phase 1. **Ships `enabled = false`. This is Peter's call, not mine.***
+
+Serious Eats' robots.txt `Disallow: /`s the named AI crawlers
+(`anthropic-ai`, `GPTBot`, `CCBot`, `PerplexityBot`) and carries a People Inc.
+licensing notice prohibiting text/data mining and LLM use. Our crawler matches
+the `*` group, which does not disallow recipe pages — so we are *technically*
+permitted while the site's stated intent is clearly the opposite.
+
+PLAN.md §7 commits this project to crawling politely and in good faith. Quietly
+taking the `*` group when a site has spelled out that it does not want this is
+not that. Seeded disabled pending an explicit decision. The adapter works and
+the fixtures are captured, so enabling it later is a one-boolean change.
+
 ### A4 — Unset and empty env vars are treated identically
 *Phase 0. Found while bringing up compose from a clean state.*
 
@@ -101,9 +125,16 @@ removes it structurally.
       ingredients, `dev@local` user, `/api/health`, `/api/recipes`.
       *Exit verified: `docker compose up` from clean → 5 extensions, 15 tables,
       117 ingredients + 117 self-aliases, health 200, `/api/recipes` → `[]`.*
-- [ ] **Phase 1 — Deterministic ingestion.** Polite fetcher, RSS/sitemap
-      discovery, JSON-LD extraction, ingredient normalization, image pipeline,
-      pg-boss, `scan_runs`, `/ops`.
+- [ ] **Phase 1 — Deterministic ingestion.** ◐ **IN PROGRESS — resume here.**
+    - [x] Polite fetcher (robots.txt, crawl delay, conditional GET, backoff)
+    - [x] RSS + sitemap discovery
+    - [x] JSON-LD → Recipe extraction, 30 committed fixtures, coverage report
+    - [ ] Ingredient normalization (parse → match → alias writeback, stages 1–2)
+    - [ ] Insert path + dedupe on `source_url` + `content_hash`
+    - [ ] Image pipeline (fetch once, downscale ~800px, `recipe-images` volume)
+    - [ ] pg-boss wiring, cron + advisory lock, `scan_runs` telemetry
+    - [ ] `sources` seeded (9 sites; Classpop + Serious Eats disabled — A6, A7)
+    - [ ] `/ops` page: last run, counts, cost
       *Exit: hundreds of real recipes with photos, zero LLM involvement.*
 - [ ] **Phase 2 — LLM enrichment.** OpenRouter client, suitability gate,
       derived fields, HTML + Reddit extraction, blurbs, budget cap, backfill.
@@ -146,3 +177,28 @@ Verified independently, not just reported: typecheck clean across all projects,
 **Gotcha for later:** the compose bind mounts are shadowed by anonymous
 `node_modules` volumes, so after any `package.json` change run
 `docker compose down -v && docker compose up --build`.
+
+### 2026-07-26 — Phase 1, part 1 of 2: discovery + extraction
+Built the polite fetcher, RSS/sitemap discovery and JSON-LD extraction as pure
+functions in `apps/worker/src/scanner/`, plus 30 real committed HTML fixtures
+and 298 tests. No database, queue or cron yet — that is part 2.
+
+**The phase's risk is now retired, and PLAN.md §1 was somewhat optimistic.**
+Probed all nine sources live. 21 of 29 captured pages carry a Recipe node.
+Details in `apps/worker/test/fixtures/COVERAGE.md`; the three findings that
+change the design:
+
+1. **RSS is not universal.** GypsyPlate and Serious Eats have no usable feed
+   (302 to homepage / WAF 403 / all RSS paths 404). The sitemap fallback is
+   load-bearing on day one, not a nicety.
+2. **Roughly a third of feed items are round-up posts** with no recipe at all
+   ("15 Best Sheet Pan Dinners"). Absence of a Recipe node is a free,
+   zero-token filter — `scan_runs` must count "no Recipe node" separately from
+   Phase 2 gate rejections, or the numbers will be unreadable.
+3. **Ratings are not free.** 9 of 21 pages have none; The Kitchn never
+   publishes `aggregateRating` at all. Treat it as genuinely optional in the UI.
+
+Also: `author` is frequently a bare `@id` reference to a sibling `Person` node
+(Yoast sites). Dereferencing took author coverage from 17/21 to 21/21 — and
+`raw_jsonld` alone cannot re-derive it, since the referenced node lives outside
+the Recipe object.

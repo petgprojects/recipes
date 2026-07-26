@@ -1,0 +1,173 @@
+# Development stack. PLAN.md §3: "docker compose up brings up all three services
+# with bind-mounts and hot reload — that's the primary dev loop *and* the
+# 'runnable entirely via docker' deliverable."
+#
+#   docker compose up          → db, migrate (one-shot), web :3000, worker
+#   docker compose down        → stop, keep pgdata
+#   docker compose down -v     → stop and wipe the database + node_modules volumes
+#
+# There are four services, not three: `migrate` is a one-shot that both `web` and
+# `worker` wait on with `service_completed_successfully`. Migrating from inside
+# the two long-lived services instead would have them race each other for the
+# same database on every `up`.
+#
+# ── the bind-mount vs node_modules problem ───────────────────────────────────
+# `- .:/app` shadows the image's `/app/node_modules` with the host's, and on
+# macOS that means a linux container trying to exec darwin-arm64 binaries
+# (esbuild, tsx's swc, lightningcss). Every service that bind-mounts the source
+# therefore also mounts an anonymous volume over each of the five directories
+# pnpm populates — the root store plus one per workspace package — which
+# re-exposes what the image installed. The list is repeated per service rather
+# than shared via a YAML anchor because YAML merges mappings, not sequences.
+#
+# Consequence worth knowing: anonymous volumes are created once and then persist.
+# After changing any package.json, run
+#   docker compose down -v && docker compose up --build
+# or the containers keep the old dependency set.
+#
+# Production overlay: docker compose -f docker-compose.yml -f compose.prod.yml up
+
+name: recipes
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: docker/dev.Dockerfile
+  env_file: .env
+  environment:
+    # Overrides whatever .env says. Inside the compose network the database host
+    # is `db`, never localhost — .env's value is the one that works from the host
+    # (`docker compose up db` + `pnpm dev`), and both need to be right.
+    DATABASE_URL: postgresql://${POSTGRES_USER:-recipes}:${POSTGRES_PASSWORD:-recipes}@db:5432/${POSTGRES_DB:-recipes}
+    NODE_ENV: development
+    # Phase 1 writes downscaled recipe images here; the volume is shared so web
+    # can serve what worker downloaded.
+    RECIPE_IMAGES_DIR: /app/data/images
+    # macOS and Windows bind mounts do not forward inotify events reliably, so
+    # both watchers poll. This is the difference between hot reload working and
+    # silently not working.
+    WATCHPACK_POLLING: "true"
+    CHOKIDAR_USEPOLLING: "true"
+    NEXT_TELEMETRY_DISABLED: "1"
+
+services:
+  # ── Postgres ───────────────────────────────────────────────────────────────
+  db:
+    # pgvector/pgvector, not postgres:16 — migration 0000 creates the `vector`
+    # extension (plus citext, pg_trgm, pgcrypto) and plain postgres:16 does not
+    # ship it, so the very first migration would fail.
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-recipes}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-recipes}
+      POSTGRES_DB: ${POSTGRES_DB:-recipes}
+      # Postgres refuses to initialise a non-empty data directory; keeping PGDATA
+      # one level down inside the volume avoids that class of surprise.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      # Exposed so you can psql or drizzle-studio against it from the host.
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-recipes} -d ${POSTGRES_DB:-recipes}"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # ── one-shot migrate + seed ────────────────────────────────────────────────
+  migrate:
+    <<: *app
+    depends_on:
+      db:
+        condition: service_healthy
+    # Both are idempotent — drizzle records applied migrations in
+    # `drizzle.__drizzle_migrations`, and the seed upserts — so running them on
+    # every `up` is free and means a pulled schema change needs no extra command.
+    command: sh -c "pnpm db:migrate && pnpm db:seed"
+    restart: "no"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/apps/web/node_modules
+      - /app/apps/worker/node_modules
+      - /app/packages/db/node_modules
+      - /app/packages/shared/node_modules
+
+  # ── Next.js ────────────────────────────────────────────────────────────────
+  web:
+    <<: *app
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # The binary directly, not `pnpm --filter @recipes/web run dev`. `pnpm run`
+    # in the signal path means docker's SIGTERM goes to pnpm, which exits before
+    # its child has finished shutting down — measurable on `worker`, where the
+    # graceful-shutdown log lines simply never appeared. Same shape here for
+    # consistency. `pnpm dev` on the host still works; this is the container's
+    # entrypoint only.
+    working_dir: /app/apps/web
+    command: ./node_modules/.bin/next dev --port 3000 --hostname 0.0.0.0
+    init: true
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/apps/web/node_modules
+      - /app/apps/worker/node_modules
+      - /app/packages/db/node_modules
+      - /app/packages/shared/node_modules
+      # .next is build output. In a volume it cannot be corrupted by a
+      # simultaneous host-side `pnpm dev`, and it avoids a lot of slow
+      # bind-mount I/O on every recompile.
+      - web-next:/app/apps/web/.next
+      - recipe-images:/app/data/images
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "node -e \"fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 60s
+
+  # ── crawler / job worker ───────────────────────────────────────────────────
+  worker:
+    <<: *app
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # tsx directly (see the note on `web`): with `pnpm run` as PID 1 the SIGTERM
+    # handler in src/index.ts never got to close the pool, and the container
+    # exited 1 on a clean `docker compose stop`.
+    working_dir: /app/apps/worker
+    command: ./node_modules/.bin/tsx watch src/index.ts
+    init: true
+    # Restarts independently of web (PLAN.md §3) — a crashed scan must not take
+    # the UI down, and vice versa.
+    restart: unless-stopped
+    # The worker's SIGTERM handler closes the connection pool; give it room
+    # before docker escalates to SIGKILL. Phase 1 will want more here once a
+    # scan can be in flight.
+    stop_grace_period: 20s
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/apps/web/node_modules
+      - /app/apps/worker/node_modules
+      - /app/packages/db/node_modules
+      - /app/packages/shared/node_modules
+      - recipe-images:/app/data/images
+
+volumes:
+  pgdata:
+  recipe-images:
+  web-next:

@@ -1,0 +1,587 @@
+[
+  {
+    "name": "avocados",
+    "aisle": "Produce",
+    "defaultUnit": null
+  },
+  {
+    "name": "baby arugula",
+    "aisle": "Produce",
+    "defaultUnit": "oz"
+  },
+  {
+    "name": "baby potatoes",
+    "aisle": "Produce",
+    "defaultUnit": "lb"
+  },
+  {
+    "name": "baby spinach",
+    "aisle": "Produce",
+    "defaultUnit": "oz"
+  },
+  {
+    "name": "bacon",
+    "aisle": "Meat & Seafood",
+    "defaultUnit": "slice"
+  },
+  {
+    "name": "bananas",
+    "aisle": "Produce",
+    "defaultUnit": null
+  },
+  {
+    "name": "bay leaves",
+    "aisle": "Spices",
+    "defaultUnit": null
+  },
+  {
+    "name": "beef broth",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "black beans",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "can"
+  },
+  {
+    "name": "black pepper",
+    "aisle": "Spices",
+    "defaultUnit": "tsp"
+  },
+  {
+    "name": "bone-in chicken thighs",
+    "aisle": "Meat & Seafood",
+    "defaultUnit": "lb"
+  },
+  {
+    "name": "boneless skinless chicken thighs",
+    "aisle": "Meat & Seafood",
+    "defaultUnit": "lb"
+  },
+  {
+    "name": "breadcrumbs",
+    "aisle": "Pantry",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "breakfast sausage",
+    "aisle": "Meat & Seafood",
+    "defaultUnit": "oz"
+  },
+  {
+    "name": "broccoli",
+    "aisle": "Produce",
+    "defaultUnit": "lb"
+  },
+  {
+    "name": "brown lentils",
+    "aisle": "Pantry",
+    "defaultUnit": "lb"
+  },
+  {
+    "name": "brown rice",
+    "aisle": "Grains & Pasta",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "brussels sprouts",
+    "aisle": "Produce",
+    "defaultUnit": "lb"
+  },
+  {
+    "name": "buffalo hot sauce",
+    "aisle": "Pantry",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "butter",
+    "aisle": "Dairy & Eggs",
+    "defaultUnit": "tbsp"
+  },
+  {
+    "name": "canned tuna",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "can"
+  },
+  {
+    "name": "cannellini beans",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "can"
+  },
+  {
+    "name": "carrots",
+    "aisle": "Produce",
+    "defaultUnit": null
+  },
+  {
+    "name": "celery",
+    "aisle": "Produce",
+    "defaultUnit": "stalk"
+  },
+  {
+    "name": "cheddar slices",
+    "aisle": "Dairy & Eggs",
+    "defaultUnit": null
+  },
+  {
+    "name": "cherry tomatoes",
+    "aisle": "Produce",
+    "defaultUnit": "pint"
+  },
+  {
+    "name": "chia seeds",
+    "aisle": "Pantry",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "chicken breast",
+    "aisle": "Meat & Seafood",
+    "defaultUnit": "lb"
+  },
+  {
+    "name": "chicken broth",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "chickpeas",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "can"
+  },
+  {
+    "name": "chili powder",
+    "aisle": "Spices",
+    "defaultUnit": "tbsp"
+  },
+  {
+    "name": "chipotle peppers in adobo",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "can"
+  },
+  {
+    "name": "cilantro",
+    "aisle": "Produce",
+    "defaultUnit": "bunch"
+  },
+  {
+    "name": "cinnamon",
+    "aisle": "Spices",
+    "defaultUnit": "tsp"
+  },
+  {
+    "name": "coconut milk",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "oz"
+  },
+  {
+    "name": "crushed tomatoes",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "oz"
+  },
+  {
+    "name": "cucumbers",
+    "aisle": "Produce",
+    "defaultUnit": null
+  },
+  {
+    "name": "curry powder",
+    "aisle": "Spices",
+    "defaultUnit": "tbsp"
+  },
+  {
+    "name": "diced tomatoes",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "oz"
+  },
+  {
+    "name": "dijon mustard",
+    "aisle": "Pantry",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "dried oregano",
+    "aisle": "Spices",
+    "defaultUnit": "tsp"
+  },
+  {
+    "name": "dried rosemary",
+    "aisle": "Spices",
+    "defaultUnit": "tbsp"
+  },
+  {
+    "name": "dried split peas",
+    "aisle": "Pantry",
+    "defaultUnit": "lb"
+  },
+  {
+    "name": "dried thyme",
+    "aisle": "Spices",
+    "defaultUnit": "tsp"
+  },
+  {
+    "name": "eggs",
+    "aisle": "Dairy & Eggs",
+    "defaultUnit": null
+  },
+  {
+    "name": "english muffins",
+    "aisle": "Bakery",
+    "defaultUnit": null
+  },
+  {
+    "name": "farro",
+    "aisle": "Grains & Pasta",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "feta",
+    "aisle": "Dairy & Eggs",
+    "defaultUnit": "oz"
+  },
+  {
+    "name": "flat-leaf parsley",
+    "aisle": "Produce",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "fresh basil",
+    "aisle": "Produce",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "fresh dill",
+    "aisle": "Produce",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "fresh ginger",
+    "aisle": "Produce",
+    "defaultUnit": "inch"
+  },
+  {
+    "name": "frozen cauliflower rice",
+    "aisle": "Frozen",
+    "defaultUnit": "oz"
+  },
+  {
+    "name": "frozen corn",
+    "aisle": "Frozen",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "frozen edamame",
+    "aisle": "Frozen",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "garlic cloves",
+    "aisle": "Produce",
+    "defaultUnit": null
+  },
+  {
+    "name": "garlic powder",
+    "aisle": "Spices",
+    "defaultUnit": "tsp"
+  },
+  {
+    "name": "gochujang",
+    "aisle": "Pantry",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "granola",
+    "aisle": "Pantry",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "grated parmesan",
+    "aisle": "Dairy & Eggs",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "ground beef",
+    "aisle": "Meat & Seafood",
+    "defaultUnit": "lb"
+  },
+  {
+    "name": "ground coriander",
+    "aisle": "Spices",
+    "defaultUnit": "tsp"
+  },
+  {
+    "name": "ground cumin",
+    "aisle": "Spices",
+    "defaultUnit": "tsp"
+  },
+  {
+    "name": "ground turkey",
+    "aisle": "Meat & Seafood",
+    "defaultUnit": "lb"
+  },
+  {
+    "name": "honey",
+    "aisle": "Pantry",
+    "defaultUnit": "tbsp"
+  },
+  {
+    "name": "italian seasoning",
+    "aisle": "Spices",
+    "defaultUnit": "tbsp"
+  },
+  {
+    "name": "jalapeño",
+    "aisle": "Produce",
+    "defaultUnit": null
+  },
+  {
+    "name": "kalamata olives",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "kale",
+    "aisle": "Produce",
+    "defaultUnit": "bunch"
+  },
+  {
+    "name": "kosher salt",
+    "aisle": "Spices",
+    "defaultUnit": "tsp"
+  },
+  {
+    "name": "large flour tortillas",
+    "aisle": "Bakery",
+    "defaultUnit": null
+  },
+  {
+    "name": "lasagna noodles",
+    "aisle": "Grains & Pasta",
+    "defaultUnit": "oz"
+  },
+  {
+    "name": "lemons",
+    "aisle": "Produce",
+    "defaultUnit": null
+  },
+  {
+    "name": "limes",
+    "aisle": "Produce",
+    "defaultUnit": null
+  },
+  {
+    "name": "long-grain rice",
+    "aisle": "Grains & Pasta",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "mangoes",
+    "aisle": "Produce",
+    "defaultUnit": null
+  },
+  {
+    "name": "maple syrup",
+    "aisle": "Pantry",
+    "defaultUnit": "tbsp"
+  },
+  {
+    "name": "mayonnaise",
+    "aisle": "Pantry",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "milk",
+    "aisle": "Dairy & Eggs",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "mixed berries",
+    "aisle": "Produce",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "olive oil",
+    "aisle": "Pantry",
+    "defaultUnit": "tbsp"
+  },
+  {
+    "name": "peanut butter",
+    "aisle": "Pantry",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "pinto beans",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "can"
+  },
+  {
+    "name": "plain greek yogurt",
+    "aisle": "Dairy & Eggs",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "red bell pepper",
+    "aisle": "Produce",
+    "defaultUnit": null
+  },
+  {
+    "name": "red cabbage",
+    "aisle": "Produce",
+    "defaultUnit": "head"
+  },
+  {
+    "name": "red enchilada sauce",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "oz"
+  },
+  {
+    "name": "red onion",
+    "aisle": "Produce",
+    "defaultUnit": null
+  },
+  {
+    "name": "red pepper flakes",
+    "aisle": "Spices",
+    "defaultUnit": "tsp"
+  },
+  {
+    "name": "red wine vinegar",
+    "aisle": "Pantry",
+    "defaultUnit": "tbsp"
+  },
+  {
+    "name": "rice vinegar",
+    "aisle": "Pantry",
+    "defaultUnit": "tbsp"
+  },
+  {
+    "name": "ricotta",
+    "aisle": "Dairy & Eggs",
+    "defaultUnit": "oz"
+  },
+  {
+    "name": "roasted peanuts",
+    "aisle": "Pantry",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "roasted red peppers",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "oz"
+  },
+  {
+    "name": "rolled oats",
+    "aisle": "Pantry",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "salsa",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "scallions",
+    "aisle": "Produce",
+    "defaultUnit": "bunch"
+  },
+  {
+    "name": "sesame seeds",
+    "aisle": "Spices",
+    "defaultUnit": "tbsp"
+  },
+  {
+    "name": "shredded cheddar",
+    "aisle": "Dairy & Eggs",
+    "defaultUnit": "oz"
+  },
+  {
+    "name": "shredded monterey jack",
+    "aisle": "Dairy & Eggs",
+    "defaultUnit": "oz"
+  },
+  {
+    "name": "shredded mozzarella",
+    "aisle": "Dairy & Eggs",
+    "defaultUnit": "oz"
+  },
+  {
+    "name": "smoked ham hock",
+    "aisle": "Meat & Seafood",
+    "defaultUnit": null
+  },
+  {
+    "name": "smoked paprika",
+    "aisle": "Spices",
+    "defaultUnit": "tsp"
+  },
+  {
+    "name": "soy sauce",
+    "aisle": "Pantry",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "spaghetti",
+    "aisle": "Grains & Pasta",
+    "defaultUnit": "lb"
+  },
+  {
+    "name": "sriracha",
+    "aisle": "Pantry",
+    "defaultUnit": "tbsp"
+  },
+  {
+    "name": "sweet potatoes",
+    "aisle": "Produce",
+    "defaultUnit": "lb"
+  },
+  {
+    "name": "toasted sesame oil",
+    "aisle": "Pantry",
+    "defaultUnit": "tbsp"
+  },
+  {
+    "name": "tomato paste",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "tbsp"
+  },
+  {
+    "name": "tortilla chips",
+    "aisle": "Pantry",
+    "defaultUnit": "oz"
+  },
+  {
+    "name": "turmeric",
+    "aisle": "Spices",
+    "defaultUnit": "tsp"
+  },
+  {
+    "name": "vanilla extract",
+    "aisle": "Pantry",
+    "defaultUnit": "tsp"
+  },
+  {
+    "name": "vegetable broth",
+    "aisle": "Canned & Jarred",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "white rice",
+    "aisle": "Grains & Pasta",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "whole milk",
+    "aisle": "Dairy & Eggs",
+    "defaultUnit": "cup"
+  },
+  {
+    "name": "yellow onion",
+    "aisle": "Produce",
+    "defaultUnit": null
+  },
+  {
+    "name": "zucchini",
+    "aisle": "Produce",
+    "defaultUnit": null
+  }
+]

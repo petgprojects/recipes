@@ -1,0 +1,23 @@
+{
+  "name": "recipes",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.17.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "db:generate": "corepack pnpm --filter @recipes/db run db:generate",
+    "db:migrate": "corepack pnpm --filter @recipes/db run db:migrate",
+    "db:seed": "corepack pnpm --filter @recipes/db run db:seed",
+    "db:studio": "corepack pnpm --filter @recipes/db run db:studio",
+    "test": "corepack pnpm -r --if-present run test",
+    "typecheck": "corepack pnpm -r --if-present run typecheck",
+    "dev": "corepack pnpm -r --parallel --if-present run dev"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "~5.9.3"
+  }
+}

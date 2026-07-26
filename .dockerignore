@@ -1,0 +1,33 @@
+# Host node_modules must never enter the image: pnpm's store contains
+# platform-specific binaries (esbuild, on this machine darwin-arm64) that are
+# unusable on the linux/amd64 or linux/arm64 image. The image runs its own
+# `pnpm install`.
+node_modules
+**/node_modules
+.pnpm-store
+
+.git
+.gitignore
+
+.next
+**/.next
+dist
+build
+out
+*.tsbuildinfo
+
+.env
+.env.local
+.env.*.local
+
+coverage
+.vitest
+**/.vite
+
+.DS_Store
+*.log
+
+# Local volume mount points, if ever bind-mounted.
+pgdata
+recipe-images
+data

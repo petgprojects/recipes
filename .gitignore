@@ -21,3 +21,5 @@ coverage/
 # local volumes / cached recipe images if ever bind-mounted
 /pgdata/
 /recipe-images/
+# RECIPE_IMAGES_DIR when the worker runs natively instead of under compose
+/data/

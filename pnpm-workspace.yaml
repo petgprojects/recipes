@@ -1,0 +1,20 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+allowBuilds:
+  esbuild: true
+  # next/image's optimizer. Not used until Phase 3, but leaving its install
+  # script blocked means the failure surfaces as a broken image pipeline much
+  # later instead of a build error now.
+  sharp: true
+minimumReleaseAgeExclude:
+  - '@next/env@15.5.22'
+  - '@next/swc-darwin-arm64@15.5.22'
+  - '@next/swc-darwin-x64@15.5.22'
+  - '@next/swc-linux-arm64-gnu@15.5.22'
+  - '@next/swc-linux-arm64-musl@15.5.22'
+  - '@next/swc-linux-x64-gnu@15.5.22'
+  - '@next/swc-linux-x64-musl@15.5.22'
+  - '@next/swc-win32-arm64-msvc@15.5.22'
+  - '@next/swc-win32-x64-msvc@15.5.22'
+  - next@15.5.22

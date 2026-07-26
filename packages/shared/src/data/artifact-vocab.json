@@ -1,0 +1,122 @@
+{
+  "aisles": [
+    {
+      "code": "B",
+      "name": "Bakery"
+    },
+    {
+      "code": "C",
+      "name": "Canned & Jarred"
+    },
+    {
+      "code": "D",
+      "name": "Dairy & Eggs"
+    },
+    {
+      "code": "F",
+      "name": "Frozen"
+    },
+    {
+      "code": "G",
+      "name": "Grains & Pasta"
+    },
+    {
+      "code": "M",
+      "name": "Meat & Seafood"
+    },
+    {
+      "code": "N",
+      "name": "Pantry"
+    },
+    {
+      "code": "P",
+      "name": "Produce"
+    },
+    {
+      "code": "S",
+      "name": "Spices"
+    }
+  ],
+  "aisleOrder": [
+    "Produce",
+    "Meat & Seafood",
+    "Dairy & Eggs",
+    "Bakery",
+    "Grains & Pasta",
+    "Canned & Jarred",
+    "Pantry",
+    "Spices",
+    "Frozen"
+  ],
+  "categories": [
+    "Beef & Turkey",
+    "Breakfast",
+    "Chicken",
+    "No-reheat",
+    "Soup",
+    "Vegetarian"
+  ],
+  "categoriesUiOrder": [
+    "All",
+    "Chicken",
+    "Beef & Turkey",
+    "Vegetarian",
+    "Soup",
+    "Breakfast",
+    "No-reheat"
+  ],
+  "tags": [
+    "10 minutes",
+    "30 minutes",
+    "Better on day two",
+    "Big batch",
+    "Cheap",
+    "Comfort",
+    "Component prep",
+    "Crunchy",
+    "Freezes",
+    "Gluten-free",
+    "Grab and go",
+    "Hands-off",
+    "High fiber",
+    "High protein",
+    "Marinate ahead",
+    "No cook",
+    "No microwave",
+    "One cleanup",
+    "One pot",
+    "Pantry staples",
+    "Reader favorite",
+    "Sheet pan",
+    "Slow cooker",
+    "Under 20 min",
+    "Vegan",
+    "Vegan option",
+    "Vegetarian"
+  ],
+  "units": [
+    "",
+    "bunch",
+    "can",
+    "cup",
+    "head",
+    "inch",
+    "lb",
+    "oz",
+    "pint",
+    "slice",
+    "stalk",
+    "tbsp",
+    "tsp"
+  ],
+  "keepsStrings": [
+    "2 months frozen",
+    "3 days",
+    "3 months frozen",
+    "4 days",
+    "4 days · 2 months frozen",
+    "4 days · 3 months frozen",
+    "5 days",
+    "5 days · 3 months frozen"
+  ]
+}

@@ -75,14 +75,32 @@ safety net rather than the expected path. §2's "Alternative worth prototyping"
 Budget Bytes, Pinch of Yum, Downshiftology, GypsyPlate, Classpop, Skinnytaste,
 The Kitchn, Love & Lemons, Serious Eats.
 
+### A4 — Unset and empty env vars are treated identically
+*Phase 0. Found while bringing up compose from a clean state.*
+
+`.env.example` deliberately ships Phase 2/4 secrets blank (`OPENROUTER_API_KEY=`),
+and PLAN.md §3 expects a `.env` copied from it to boot. The original Zod helper
+was `.string().trim().min(1).optional()`, but `.optional()` only rescues
+`undefined` — `min(1)` rejects `""` before optionality is considered, so a stock
+`.env` made every service refuse to boot. The emptiness check now happens inside
+the `.transform()`. `FOO=` and an absent `FOO` are now the same thing: not
+configured.
+
+### A5 — Compose migrates in a dedicated one-shot service
+*Phase 0.* `web` and `worker` both wait on a `migrate` service with
+`condition: service_completed_successfully`, rather than either app migrating at
+startup. Two services racing to migrate the same database is a real bug; this
+removes it structurally.
+
 ---
 
 ## Phase checklist
 
-- [ ] **Phase 0 — Scaffold.** Monorepo, docker-compose, Drizzle schema +
-      migration, vocabularies, Zod env module, ~120 seeded canonical
+- [x] **Phase 0 — Scaffold.** ✅ Monorepo, docker-compose, Drizzle schema +
+      migration, vocabularies, Zod env module, 117 seeded canonical
       ingredients, `dev@local` user, `/api/health`, `/api/recipes`.
-      *Exit: `docker compose up` → migrated schema, seeded ingredients, health green.*
+      *Exit verified: `docker compose up` from clean → 5 extensions, 15 tables,
+      117 ingredients + 117 self-aliases, health 200, `/api/recipes` → `[]`.*
 - [ ] **Phase 1 — Deterministic ingestion.** Polite fetcher, RSS/sitemap
       discovery, JSON-LD extraction, ingredient normalization, image pipeline,
       pg-boss, `scan_runs`, `/ops`.
@@ -106,4 +124,25 @@ The Kitchn, Love & Lemons, Serious Eats.
 ### 2026-07-26 — Baseline
 Repo had no commits. Committed `PLAN.md`, `reqs.md`, `meal-prep-planner.jsx`
 as-is plus this file and a `.gitignore`. Verified toolchain: Node 24.13,
-Docker 29.2, Compose v5.0.2. pnpm absent — enabled via `corepack`.
+Docker 29.2, Compose v5.0.2. pnpm absent from PATH — **use `corepack pnpm`**
+for every command (`corepack enable pnpm` needs sudo; not required).
+
+### 2026-07-26 — Phase 0 complete
+Extracted the artifact's lasting value before touching it: 117 canonical
+`{name, aisle, defaultUnit}` ingredients, the real vocabularies (9 aisles in
+store-walk order, 6 categories, 27 tags), the 24 recipes as UI fixtures, and
+272 lines of CSS byte-identical for the Phase 3 port. `meal-prep-planner.jsx`
+stays until Phase 3 retires it.
+
+Built `packages/shared` (vocab, units, Zod env, schemas) and `packages/db`
+(full §4 schema, extensions migration ordered first, idempotent seed), then
+`apps/web`, `apps/worker` and the compose stack.
+
+Verified independently, not just reported: typecheck clean across all projects,
+38/38 tests pass, and `docker compose down -v` → `up --build` yields
+`{"reachable":true,"migrated":true,"seeded":true,"ingredients":117}` with
+`/api/recipes` → `[]`, which is the correct Phase 0 answer.
+
+**Gotcha for later:** the compose bind mounts are shadowed by anonymous
+`node_modules` volumes, so after any `package.json` change run
+`docker compose down -v && docker compose up --build`.

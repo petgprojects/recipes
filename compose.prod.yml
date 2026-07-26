@@ -1,0 +1,57 @@
+# Production overlay (PLAN.md §3: "A compose.prod.yml overlay does real builds
+# with no mounts").
+#
+#   docker compose -f docker-compose.yml -f compose.prod.yml up -d --build
+#
+# Thin by design: it changes the build target, drops every bind mount and
+# anonymous node_modules volume, and flips NODE_ENV. `db` is inherited unchanged.
+#
+# NOT exercised by Phase 0 — the dev stack is the tested path. Things to check
+# the first time this is used for real: NEXT_PUBLIC_APP_URL must be the public
+# origin (it is baked into the client bundle at build time, so it cannot be
+# changed by restarting the container), AUTH_SECRET must be set once Phase 4
+# lands, and `db`'s port should probably stop being published to the host.
+#
+# `!reset` is what removes an inherited list entry — compose merges sequences by
+# union, so without it the dev bind mounts would survive into production.
+
+services:
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/prod.Dockerfile
+      target: migrate-runtime
+    environment:
+      NODE_ENV: production
+    volumes: !reset []
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/prod.Dockerfile
+      target: web-runtime
+      args:
+        # Baked into the client bundle by `next build`, so it is a build arg and
+        # not just an env var.
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+    command: !reset null
+    environment:
+      NODE_ENV: production
+      # No file watching in production.
+      WATCHPACK_POLLING: "false"
+      CHOKIDAR_USEPOLLING: "false"
+    volumes: !override
+      # The image is self-contained; only the shared image cache is stateful.
+      - recipe-images:/app/data/images
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/prod.Dockerfile
+      target: worker-runtime
+    command: !reset null
+    environment:
+      NODE_ENV: production
+      CHOKIDAR_USEPOLLING: "false"
+    volumes: !override
+      - recipe-images:/app/data/images

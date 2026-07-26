@@ -131,7 +131,7 @@ removes it structurally.
       ingredients, `dev@local` user, `/api/health`, `/api/recipes`.
       *Exit verified: `docker compose up` from clean → 5 extensions, 15 tables,
       117 ingredients + 117 self-aliases, health 200, `/api/recipes` → `[]`.*
-- [ ] **Phase 1 — Deterministic ingestion.** ◐ **IN PROGRESS — `/ops` + live exit validation remain.**
+- [ ] **Phase 1 — Deterministic ingestion.** ◐ **IN PROGRESS — live exit validation remains.**
     - [x] Polite fetcher (robots.txt, crawl delay, conditional GET, backoff)
     - [x] RSS + sitemap discovery
     - [x] JSON-LD → Recipe extraction, 30 committed fixtures, coverage report
@@ -140,7 +140,7 @@ removes it structurally.
     - [x] Image pipeline (fetch once, downscale ~800px, `recipe-images` volume)
     - [x] pg-boss wiring, cron + advisory lock, `scan_runs` telemetry
     - [x] `sources` seeded (8 approved blogs, all enabled — A6, A7)
-    - [ ] `/ops` page: last run, counts, cost
+    - [x] `/ops` page: last run, counts, cost, manual queue control
       *Exit: hundreds of real recipes with photos, zero LLM involvement.*
 - [ ] **Phase 2 — LLM enrichment.** OpenRouter client, suitability gate,
       derived fields, HTML + Reddit extraction, blurbs, budget cap, backfill.
@@ -255,8 +255,22 @@ failures are recorded as partial without repeatedly re-fetching the whole
 source. Feed `304` responses only skip discovery when stored recipes prove the
 source has been populated.
 
-Verification: the complete workspace has 419 passing tests (shared 35, db 19,
-worker 365), all workspace typechecks pass, the fixture coverage report passes,
+Verification: the complete workspace has 420 passing tests (shared 35, db 19,
+worker 366), all workspace typechecks pass, the fixture coverage report passes,
 database-backed lifecycle tests pass, duplicate queue sends coalesce, and a
 real worker startup/shutdown smoke test initialized pg-boss and cron then
-released both cleanly with bootstrap crawling disabled.
+released both cleanly with bootstrap crawling disabled. Interrupted jobs
+finalize their `scan_runs` telemetry before propagating the abort for retry.
+
+### 2026-07-26 — Phase 1, operations surface
+Added a dynamic, server-rendered `/ops` control room with recipe/source totals,
+an aggregate of each enabled source's latest state, checkpoint-aware per-source
+health, error detail, recent scan history, durations and LLM cost. Sitemap-only
+sources are labeled explicitly rather than appearing to lack a feed validator.
+
+The accessible "Scan now" control POSTs to a lightweight web-side pg-boss
+producer and returns immediately; the worker remains the only scan executor.
+The shared queue's exclusive policy coalesces repeated manual requests. A live
+endpoint probe returned queued then coalesced, and the responsive page was
+checked at desktop and mobile widths with no page overflow or browser errors.
+The production Next.js build and all workspace typechecks pass.

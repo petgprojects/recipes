@@ -16,7 +16,7 @@ const nextConfig: NextConfig = {
    * bundler should touch. Keeping it external also keeps the connection-pool
    * singleton in `@recipes/db/client` a genuine singleton per process.
    */
-  serverExternalPackages: ['postgres'],
+  serverExternalPackages: ['postgres', 'pg-boss', 'pg'],
 
   /**
    * pnpm monorepo: the app's dependencies live in the workspace root, several

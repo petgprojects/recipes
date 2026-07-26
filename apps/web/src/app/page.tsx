@@ -1,7 +1,4 @@
-/**
- * Placeholder root page. Phase 3 owns the UI; this exists so `/` is not a 404
- * while the interesting surface is the two API routes below.
- */
+/** Placeholder root page. Phase 3 owns the recipe-planning UI. */
 
 const wrap: React.CSSProperties = {
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
@@ -14,21 +11,25 @@ const wrap: React.CSSProperties = {
 export default function Home() {
   return (
     <main style={wrap}>
-      <h1>Recipe Planner — Phase 0</h1>
+      <h1>Recipe Planner</h1>
       <p>
-        Scaffold only. The database is migrated and seeded with the canonical ingredient list; no
-        recipes exist yet because every recipe arrives from a crawl (PLAN.md §5, Phase 1).
+        Deterministic ingestion is operational. Every recipe in the database arrives from an
+        approved source crawl; the planning interface follows in Phase 3.
       </p>
       <ul>
+        <li>
+          <a href="/ops">Operations</a> — source checkpoints, scan telemetry, and the manual scan
+          queue.
+        </li>
         <li>
           <a href="/api/health">GET /api/health</a> — app status plus a real database round-trip.
         </li>
         <li>
-          <a href="/api/recipes">GET /api/recipes</a> — returns <code>[]</code>, and that is the
-          correct Phase 0 result. Supports <code>?since=&lt;iso&gt;</code> and <code>?limit=</code>.
+          <a href="/api/recipes">GET /api/recipes</a> — browse newly ingested recipes. Supports{' '}
+          <code>?since=&lt;iso&gt;</code> and <code>?limit=</code>.
         </li>
       </ul>
-      <p>Next up: Phase 1 — deterministic ingestion (RSS/sitemap → JSON-LD → Postgres).</p>
+      <p>Pipeline: RSS/sitemap → JSON-LD → normalized ingredients → Postgres.</p>
     </main>
   );
 }

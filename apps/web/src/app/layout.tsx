@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import './globals.css';
 
 /**
  * Deliberately bare. PLAN.md §5 Phase 3 ports `meal-prep-planner.jsx` and its
@@ -10,7 +11,7 @@ import type { ReactNode } from 'react';
 
 export const metadata: Metadata = {
   title: 'Recipe Planner',
-  description: 'Self-hosted meal-prep recipe planner — Phase 0 scaffold.',
+  description: 'Self-hosted meal-prep recipe planner.',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

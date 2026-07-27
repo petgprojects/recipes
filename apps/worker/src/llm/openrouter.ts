@@ -14,7 +14,9 @@ import {
 
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
 const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash';
-const DEFAULT_TIMEOUT_MS = 90_000;
+// Live structured generations occasionally take 90–150 seconds. Keep enough
+// headroom for those while still aborting a genuinely stuck provider request.
+const DEFAULT_TIMEOUT_MS = 180_000;
 const MAX_REPAIR_CONTENT_CHARS = 12_000;
 const MAX_VALIDATION_ERROR_CHARS = 4_000;
 
@@ -102,6 +104,7 @@ export interface CreateStructuredOutputClientOptions {
   readonly transport: ChatCompletionTransport;
   readonly model?: string;
   readonly pricing?: LlmPricing;
+  readonly requestTimeoutMs?: number;
 }
 
 export class StructuredOutputError extends Error {
@@ -151,6 +154,7 @@ export function createOpenRouterClient(
     transport,
     model: config.model,
     pricing: config.pricing,
+    requestTimeoutMs: config.timeoutMs,
   });
 }
 
@@ -160,6 +164,7 @@ export function createStructuredOutputClient(
 ): StructuredOutputClient {
   const model = options.model ?? DEFAULT_MODEL;
   const pricing = options.pricing ?? DEEPSEEK_V4_FLASH_PRICING;
+  const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   return {
     async complete<T>(
@@ -188,6 +193,7 @@ export function createStructuredOutputClient(
             responseFormat,
             initialMessages,
             callOptions.signal,
+            requestTimeoutMs,
           ),
         (response) =>
           reportUsage(
@@ -234,6 +240,7 @@ export function createStructuredOutputClient(
             responseFormat,
             repairMessages,
             callOptions.signal,
+            requestTimeoutMs,
           ),
         (response) =>
           reportUsage(
@@ -276,6 +283,7 @@ function strictResponseFormat<T>(task: StructuredOutputTask<T>): ResponseFormat 
   const schema = z.toJSONSchema(task.schema);
   // `$schema` is metadata, not part of the strict output contract.
   delete schema.$schema;
+  stripUnsupportedRegexPatterns(schema);
   return {
     type: 'json_schema',
     json_schema: {
@@ -286,6 +294,30 @@ function strictResponseFormat<T>(task: StructuredOutputTask<T>): ResponseFormat 
   };
 }
 
+/**
+ * OpenRouter validates strict schemas with a non-JavaScript regex engine.
+ * ECMAScript Unicode property escapes such as `\p{L}` are rejected before a
+ * model is called. Zod still applies those refinements to the returned value,
+ * so omitting only those wire-level patterns preserves the stronger local
+ * validation without making an otherwise valid strict request unroutable.
+ */
+function stripUnsupportedRegexPatterns(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) stripUnsupportedRegexPatterns(item);
+    return;
+  }
+  if (!isRecord(value)) return;
+  if (
+    typeof value.pattern === 'string' &&
+    /\\[pP]\{/.test(value.pattern)
+  ) {
+    delete value.pattern;
+  }
+  for (const child of Object.values(value)) {
+    stripUnsupportedRegexPatterns(child);
+  }
+}
+
 async function request<T>(
   transport: ChatCompletionTransport,
   model: string,
@@ -293,7 +325,13 @@ async function request<T>(
   responseFormat: ResponseFormat,
   messages: ChatCompletionMessageParam[],
   signal: AbortSignal | undefined,
+  timeoutMs: number,
 ): Promise<ChatCompletion> {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const requestSignal =
+    signal === undefined
+      ? timeoutSignal
+      : AbortSignal.any([signal, timeoutSignal]);
   return transport.create(
     {
       model,
@@ -309,7 +347,7 @@ async function request<T>(
         // request unroutable.
         : { max_tokens: task.maxCompletionTokens }),
     },
-    { signal, maxRetries: 0 },
+    { signal: requestSignal, maxRetries: 0 },
   );
 }
 
@@ -324,8 +362,14 @@ async function reportUsage(
   await callback(normalizeOpenRouterUsage(response, pricing), {
     taskName,
     attempt,
-    responseId: response.id,
-    model: response.model,
+    responseId:
+      typeof response.id === 'string' && response.id.length > 0
+        ? response.id
+        : 'unknown',
+    model:
+      typeof response.model === 'string' && response.model.length > 0
+        ? response.model
+        : 'unknown',
   });
 }
 
@@ -344,24 +388,44 @@ function parseStructuredResponse<T>(
   response: ChatCompletion,
   attempt: 'initial' | 'repair',
 ): ParseResult<T> {
-  const choice = response.choices[0];
-  if (choice === undefined) {
-    return failed(task.name, attempt, null, 'response contained no choices', true);
+  const rawChoices = (response as unknown as { choices?: unknown }).choices;
+  if (!Array.isArray(rawChoices) || rawChoices.length === 0) {
+    const providerError = providerEnvelopeError(response);
+    return failed(
+      task.name,
+      attempt,
+      null,
+      providerError === null
+        ? 'response contained no choices'
+        : `response contained no choices: ${providerError}`,
+      true,
+    );
   }
+  const choice = rawChoices[0];
+  if (!isRecord(choice) || !isRecord(choice.message)) {
+    return failed(
+      task.name,
+      attempt,
+      null,
+      'response contained an invalid choice envelope',
+      true,
+    );
+  }
+  const content =
+    typeof choice.message.content === 'string' ? choice.message.content : null;
   if (choice.message.refusal !== null && choice.message.refusal !== undefined) {
     return failed(
       task.name,
       attempt,
-      choice.message.content,
-      `model refused the request: ${choice.message.refusal}`,
+      content,
+      `model refused the request: ${String(choice.message.refusal)}`,
       false,
     );
   }
   if (choice.finish_reason === 'content_filter') {
-    return failed(task.name, attempt, choice.message.content, 'content was filtered', false);
+    return failed(task.name, attempt, content, 'content was filtered', false);
   }
 
-  const content = choice.message.content;
   if (content === null || content.trim() === '') {
     return failed(task.name, attempt, content, 'response content was empty', true);
   }
@@ -401,6 +465,20 @@ function parseStructuredResponse<T>(
     );
   }
   return { success: true, data: validated.data };
+}
+
+function providerEnvelopeError(response: ChatCompletion): string | null {
+  const envelope = response as unknown;
+  if (!isRecord(envelope)) return null;
+  if (typeof envelope.error === 'string') return envelope.error;
+  if (!isRecord(envelope.error)) return null;
+  return typeof envelope.error.message === 'string'
+    ? envelope.error.message
+    : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 function failed<T>(

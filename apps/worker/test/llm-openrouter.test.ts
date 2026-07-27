@@ -73,7 +73,8 @@ describe('OpenRouter strict structured output', () => {
       (body.response_format as { json_schema?: { schema?: Record<string, unknown> } })
         .json_schema?.schema,
     ).not.toHaveProperty('$schema');
-    expect(requestOptions).toEqual({ signal, maxRetries: 0 });
+    expect(requestOptions).toMatchObject({ maxRetries: 0 });
+    expect(requestOptions?.signal).toBeInstanceOf(AbortSignal);
     expect(usage).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
         tokensIn: 100,
@@ -145,6 +146,47 @@ describe('OpenRouter strict structured output', () => {
     });
   });
 
+  it('repairs a provider error envelope with no choices instead of throwing a TypeError', async () => {
+    const malformedEnvelope = {
+      error: { message: 'upstream returned an empty generation' },
+      usage: {
+        prompt_tokens: 1,
+        completion_tokens: 1,
+        total_tokens: 2,
+        cost: 0,
+      },
+    } as unknown as ChatCompletion;
+    const create = vi
+      .fn<ChatCompletionTransport['create']>()
+      .mockResolvedValueOnce(malformedEnvelope)
+      .mockResolvedValueOnce(completion('{"ok":true,"note":"repaired"}'));
+    const usage = vi.fn();
+
+    await expect(
+      createStructuredOutputClient({ transport: { create } }).complete(TASK, {
+        onUsage: usage,
+      }),
+    ).resolves.toEqual({ ok: true, note: 'repaired' });
+
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(usage).toHaveBeenCalledTimes(2);
+    expect(usage.mock.calls[0]![1]).toMatchObject({
+      attempt: 'initial',
+      responseId: 'unknown',
+      model: 'unknown',
+    });
+    expect(create.mock.calls[1]![0].messages[2]).toEqual({
+      role: 'assistant',
+      content: '(no content)',
+    });
+    expect(create.mock.calls[1]![0].messages[3]).toMatchObject({
+      role: 'user',
+      content: expect.stringContaining(
+        'response contained no choices: upstream returned an empty generation',
+      ),
+    });
+  });
+
   it('lets the budget guard stop a repair before a second provider call', async () => {
     const create = vi
       .fn<ChatCompletionTransport['create']>()
@@ -192,6 +234,27 @@ describe('OpenRouter strict structured output', () => {
       }),
     ).rejects.toThrow('budget blocked');
     expect(afterRequest).not.toHaveBeenCalled();
+  });
+
+  it('enforces an explicit per-request abort deadline', async () => {
+    const create = vi.fn<ChatCompletionTransport['create']>(
+      async (_params, requestOptions) =>
+        new Promise<ChatCompletion>((_resolve, reject) => {
+          requestOptions?.signal?.addEventListener(
+            'abort',
+            () => reject(requestOptions.signal?.reason),
+            { once: true },
+          );
+        }),
+    );
+
+    await expect(
+      createStructuredOutputClient({
+        transport: { create },
+        requestTimeoutMs: 5,
+      }).complete(TASK),
+    ).rejects.toThrow(/timeout/i);
+    expect(create).toHaveBeenCalledOnce();
   });
 
   it('fails after exactly one repair when both responses are invalid', async () => {

@@ -136,46 +136,52 @@ export function createPostgresIngredientBackfillOrchestrator(
   options: CreatePostgresEnrichmentOrchestratorOptions,
 ): IngredientBackfillOrchestrator {
   const now = options.now ?? (() => new Date());
-  return createIngredientBackfillOrchestrator({
-    now,
-    beginRun: (startedAt) => beginEnrichmentRun(options.db, startedAt),
-    finishRun: (input) => finishEnrichmentRun(options.db, input),
-    loadUnmappedLines: (limit) =>
-      loadUnmappedIngredientLines(options.db, limit),
-    async countRemaining() {
-      const [row] = await options.db
-        .select({
-          count: sql<number>`count(*)::int`,
-        })
-        .from(recipeIngredients)
-        .where(isNull(recipeIngredients.ingredientId));
-      return row?.count ?? 0;
+  return createIngredientBackfillOrchestrator(
+    {
+      now,
+      beginRun: (startedAt) => beginEnrichmentRun(options.db, startedAt),
+      finishRun: (input) => finishEnrichmentRun(options.db, input),
+      loadUnmappedLines: (limit) =>
+        loadUnmappedIngredientLines(options.db, limit),
+      async countRemaining() {
+        const [row] = await options.db
+          .select({
+            count: sql<number>`count(*)::int`,
+          })
+          .from(recipeIngredients)
+          .where(isNull(recipeIngredients.ingredientId));
+        return row?.count ?? 0;
+      },
+      loadCanonicalIngredients() {
+        return options.db
+          .select({
+            name: ingredients.name,
+            aisle: ingredients.aisle,
+          })
+          .from(ingredients)
+          .orderBy(asc(ingredients.name));
+      },
+      mapIngredients: (input, context) =>
+        mapIngredients(
+          options.client,
+          input,
+          createBudgetedLlmCallOptions({
+            db: options.db,
+            runId: context.runId,
+            dailyBudgetUsd: options.dailyBudgetUsd,
+            signal: context.signal,
+            now: options.now,
+          }),
+        ),
+      applyMappings: (decisions, refs) =>
+        applyIngredientMappings(options.db, decisions, refs),
+      isBudgetExceeded: isLlmBudgetExceeded,
     },
-    loadCanonicalIngredients() {
-      return options.db
-        .select({
-          name: ingredients.name,
-          aisle: ingredients.aisle,
-        })
-        .from(ingredients)
-        .orderBy(asc(ingredients.name));
-    },
-    mapIngredients: (input, context) =>
-      mapIngredients(
-        options.client,
-        input,
-        createBudgetedLlmCallOptions({
-          db: options.db,
-          runId: context.runId,
-          dailyBudgetUsd: options.dailyBudgetUsd,
-          signal: context.signal,
-          now: options.now,
-        }),
-      ),
-    applyMappings: (decisions, refs) =>
-      applyIngredientMappings(options.db, decisions, refs),
-    isBudgetExceeded: isLlmBudgetExceeded,
-  });
+    // Forty-name batches reached the model's output cap and made repairs
+    // unnecessarily fragile in the live backfill. Twenty keeps the prompt
+    // bounded while still mapping all duplicate rows for each chosen name.
+    { batchSize: 20 },
+  );
 }
 
 export async function hasPendingRecipes(db: Database): Promise<boolean> {

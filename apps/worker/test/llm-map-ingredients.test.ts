@@ -94,7 +94,7 @@ describe('semantic ingredient mapping task', () => {
     ).toBe(false);
   });
 
-  it('rejects invalid existing targets and misuse of existing names as new', async () => {
+  it('rejects invalid existing targets and normalizes an existing name mislabeled as new', async () => {
     const task = await capturedTask();
 
     const invalidExisting = task.schema.safeParse({
@@ -108,21 +108,37 @@ describe('semantic ingredient mapping task', () => {
     });
     expect(invalidExisting.success).toBe(false);
     if (!invalidExisting.success) {
-      expect(invalidExisting.error.message).toContain('not in the supplied vocabulary');
+      expect(invalidExisting.error.message).toContain('Invalid option');
+      expect(invalidExisting.error.message).toContain('scallions');
     }
 
-    expect(
-      task.schema.safeParse({
-        decisions: [
-          VALID_OUTPUT.decisions[0],
-          {
-            ...VALID_OUTPUT.decisions[1],
-            canonical_name: 'olive oil',
-            aisle: 'Pantry',
-          },
-        ],
-      }).success,
-    ).toBe(false);
+    const mislabeled = {
+      decisions: [
+        VALID_OUTPUT.decisions[0],
+        {
+          ...VALID_OUTPUT.decisions[1],
+          canonical_name: 'olive oil',
+          aisle: 'Produce' as const,
+        },
+      ],
+    };
+    expect(task.schema.safeParse(mislabeled).success).toBe(true);
+    await expect(
+      mapIngredients(validatingFakeClient([mislabeled], []), {
+        unknownNames: ['green onions', 'black garlic'],
+        canonicalIngredients: CANONICAL,
+      }),
+    ).resolves.toEqual({
+      decisions: [
+        VALID_OUTPUT.decisions[0],
+        {
+          input_name: 'black garlic',
+          action: 'existing',
+          canonical_name: 'olive oil',
+          aisle: null,
+        },
+      ],
+    });
   });
 
   it('rejects unsafe names and undeclared quantity/note fields', async () => {
@@ -302,8 +318,63 @@ describe('semantic ingredient mapping task', () => {
     );
     expect(create.mock.calls[1]?.[0].messages[3]).toMatchObject({
       role: 'user',
-      content: expect.stringContaining('not in the supplied vocabulary'),
+      content: expect.stringContaining(
+        'expected one of "scallions"|"garlic cloves"|"olive oil"',
+      ),
     });
+  });
+
+  it('omits JavaScript-only Unicode regex patterns from the provider schema', async () => {
+    const output = {
+      decisions: [
+        {
+          input_name: 'jalapeño',
+          action: 'new' as const,
+          canonical_name: 'jalapeño',
+          aisle: 'Produce' as const,
+        },
+      ],
+    };
+    const create = vi
+      .fn<ChatCompletionTransport['create']>()
+      .mockResolvedValue(completion(output));
+
+    await expect(
+      mapIngredients(
+        createStructuredOutputClient({ transport: { create } }),
+        {
+          unknownNames: ['jalapeño'],
+          canonicalIngredients: CANONICAL,
+        },
+      ),
+    ).resolves.toEqual(output);
+
+    const responseFormat = create.mock.calls[0]![0].response_format;
+    expect(JSON.stringify(responseFormat)).not.toContain(String.raw`\p{`);
+  });
+
+  it('puts exact input and existing canonical names into the provider schema', async () => {
+    const create = vi
+      .fn<ChatCompletionTransport['create']>()
+      .mockResolvedValue(completion(VALID_OUTPUT));
+
+    await mapIngredients(
+      createStructuredOutputClient({ transport: { create } }),
+      {
+        unknownNames: ['green onions', 'black garlic'],
+        canonicalIngredients: CANONICAL,
+      },
+    );
+
+    const wireSchema = JSON.stringify(
+      create.mock.calls[0]![0].response_format,
+    );
+    expect(wireSchema).toContain(
+      '"enum":["green onions","black garlic"]',
+    );
+    expect(wireSchema).toContain(
+      '"enum":["scallions","garlic cloves","olive oil"]',
+    );
   });
 });
 

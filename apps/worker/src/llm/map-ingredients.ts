@@ -1,8 +1,6 @@
 import {
   AISLES,
   canonicalIngredientSummarySchema,
-  ingredientMappingDecisionSchema,
-  ingredientMappingOutputSchema,
   normalizedIngredientNameSchema,
   type CanonicalIngredientSummary,
   type IngredientMappingOutput,
@@ -66,7 +64,7 @@ export async function mapIngredients(
     canonical_ingredients: validatedInput.canonicalIngredients,
   };
 
-  return client.complete(
+  const output = await client.complete(
     {
       name: 'ingredient_semantic_mapping',
       schema: responseSchema,
@@ -76,24 +74,71 @@ export async function mapIngredients(
     },
     options,
   );
+  const canonicalNames = new Set(
+    validatedInput.canonicalIngredients.map((ingredient) => ingredient.name),
+  );
+  return {
+    decisions: output.decisions.map((decision) =>
+      canonicalNames.has(decision.canonical_name)
+        ? {
+            input_name: decision.input_name,
+            action: 'existing' as const,
+            canonical_name: decision.canonical_name,
+            aisle: null,
+          }
+        : decision,
+    ),
+  };
 }
 
 function mappingSchemaFor(
   input: z.infer<typeof mapIngredientsInputSchema>,
 ): z.ZodType<IngredientMappingOutput> {
   const inputNames = new Set(input.unknownNames);
-  const canonicalNames = new Set(
-    input.canonicalIngredients.map((ingredient) => ingredient.name),
+  const canonicalNameValues = input.canonicalIngredients.map(
+    (ingredient) => ingredient.name,
   );
+  const canonicalNames = new Set(canonicalNameValues);
+  const inputNameSchema = z.enum(
+    input.unknownNames as [string, ...string[]],
+  );
+  const newDecisionSchema = z
+    .object({
+      input_name: inputNameSchema,
+      action: z.literal('new'),
+      canonical_name: normalizedIngredientNameSchema,
+      aisle: z.enum(AISLES),
+    })
+    .strict();
+  const decisionSchema =
+    canonicalNameValues.length === 0
+      ? newDecisionSchema
+      : z.discriminatedUnion('action', [
+          z
+            .object({
+              input_name: inputNameSchema,
+              action: z.literal('existing'),
+              // Put the exact database vocabulary into the provider-facing
+              // schema. Prompt-only membership was not strong enough: the
+              // live model occasionally returned plausible near-matches.
+              canonical_name: z.enum(
+                canonicalNameValues as [string, ...string[]],
+              ),
+              aisle: z.null(),
+            })
+            .strict(),
+          newDecisionSchema,
+        ]);
 
   // The dynamic length reaches JSON Schema as equal minItems/maxItems, while
   // the refinements below enforce exact identity coverage client-side.
-  return ingredientMappingOutputSchema
-    .extend({
+  return z
+    .object({
       decisions: z
-        .array(ingredientMappingDecisionSchema)
+        .array(decisionSchema)
         .length(input.unknownNames.length),
     })
+    .strict()
     .superRefine((output, context) => {
       const seenInputs = new Set<string>();
       const proposedNewAisles = new Map<string, string>();
@@ -127,15 +172,6 @@ function mappingSchemaFor(
           continue;
         }
 
-        if (canonicalNames.has(decision.canonical_name)) {
-          context.addIssue({
-            code: 'custom',
-            path: ['decisions', index, 'canonical_name'],
-            message:
-              `canonical_name already exists and must use action="existing": ` +
-              decision.canonical_name,
-          });
-        }
         const proposedAisle = proposedNewAisles.get(decision.canonical_name);
         if (
           proposedAisle !== undefined &&

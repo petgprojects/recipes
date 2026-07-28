@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "capture": "tsx scripts/capture-fixtures.ts",
     "coverage": "tsx scripts/coverage-report.ts",
+    "repair:ingredients": "tsx scripts/repair-mismapped-ingredients.ts",
     "test": "vitest run"
   },
   "dependencies": {

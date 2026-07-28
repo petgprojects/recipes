@@ -130,7 +130,7 @@ describe('Phase 2 LLM task schemas', () => {
             input_name: 'green onions',
             action: 'existing',
             canonical_name: 'scallions',
-            aisle: null,
+            aisle: 'Produce',
           },
           {
             input_name: 'black garlic',
@@ -175,7 +175,7 @@ describe('Phase 2 LLM task schemas', () => {
             input_name: 'green onions',
             action: 'existing',
             canonical_name: 'scallions',
-            aisle: null,
+            aisle: 'Produce',
             quantity: 2,
           },
         ],

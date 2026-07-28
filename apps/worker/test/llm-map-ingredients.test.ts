@@ -18,10 +18,10 @@ const CANONICAL = [
 const VALID_OUTPUT = {
   decisions: [
     {
-      input_name: 'green onions',
+      input_name: 'garlic clove',
       action: 'existing',
-      canonical_name: 'scallions',
-      aisle: null,
+      canonical_name: 'garlic cloves',
+      aisle: 'Produce',
     },
     {
       input_name: 'black garlic',
@@ -39,7 +39,7 @@ describe('semantic ingredient mapping task', () => {
 
     await expect(
       mapIngredients(client, {
-        unknownNames: ['green onions', 'black garlic'],
+        unknownNames: ['garlic clove', 'black garlic'],
         canonicalIngredients: CANONICAL,
       }),
     ).resolves.toEqual(VALID_OUTPUT);
@@ -47,7 +47,7 @@ describe('semantic ingredient mapping task', () => {
     const task = captured[0]!;
     expect(task.name).toBe('ingredient_semantic_mapping');
     expect(task.systemPrompt).toBe(MAP_INGREDIENTS_SYSTEM_PROMPT);
-    expect(task.systemPrompt).not.toContain('green onions');
+    expect(task.systemPrompt).not.toContain('garlic clove');
     expect(task.maxCompletionTokens).toBe(8_192);
     const payload = JSON.parse(
       between(task.userPrompt, '<ingredient_data>', '</ingredient_data>'),
@@ -56,7 +56,7 @@ describe('semantic ingredient mapping task', () => {
       canonical_ingredients: { name: string; aisle: string }[];
     };
     expect(payload).toEqual({
-      unknown_names: ['green onions', 'black garlic'],
+      unknown_names: ['garlic clove', 'black garlic'],
       canonical_ingredients: CANONICAL,
     });
   });
@@ -117,7 +117,7 @@ describe('semantic ingredient mapping task', () => {
         VALID_OUTPUT.decisions[0],
         {
           ...VALID_OUTPUT.decisions[1],
-          canonical_name: 'olive oil',
+          canonical_name: 'garlic cloves',
           aisle: 'Produce' as const,
         },
       ],
@@ -125,7 +125,7 @@ describe('semantic ingredient mapping task', () => {
     expect(task.schema.safeParse(mislabeled).success).toBe(true);
     await expect(
       mapIngredients(validatingFakeClient([mislabeled], []), {
-        unknownNames: ['green onions', 'black garlic'],
+        unknownNames: ['garlic clove', 'black garlic'],
         canonicalIngredients: CANONICAL,
       }),
     ).resolves.toEqual({
@@ -134,11 +134,66 @@ describe('semantic ingredient mapping task', () => {
         {
           input_name: 'black garlic',
           action: 'existing',
-          canonical_name: 'olive oil',
-          aisle: null,
+          canonical_name: 'garlic cloves',
+          aisle: 'Produce',
         },
       ],
     });
+  });
+
+  it('rewrites an implausible existing match as a new canonical', async () => {
+    // The live failure this guards (PROGRESS.md amendment A18): the provider
+    // schema pins `canonical_name` to the whole vocabulary, so a model that has
+    // committed to "existing" must name *something* in it. `ketchup` came back
+    // as `kalamata olives` eight times.
+    const collided = {
+      decisions: [
+        {
+          input_name: 'ketchup',
+          action: 'existing' as const,
+          canonical_name: 'olive oil',
+          aisle: 'Pantry' as const,
+        },
+      ],
+    };
+
+    await expect(
+      mapIngredients(validatingFakeClient([collided], []), {
+        unknownNames: ['ketchup'],
+        canonicalIngredients: CANONICAL,
+      }),
+    ).resolves.toEqual({
+      decisions: [
+        {
+          input_name: 'ketchup',
+          action: 'new',
+          canonical_name: 'ketchup',
+          // The model's own aisle for the *input* is what survives, which is
+          // the whole reason `existing` decisions are asked for one.
+          aisle: 'Pantry',
+        },
+      ],
+    });
+  });
+
+  it('leaves an existing match that shares an identity word alone', async () => {
+    const plausible = {
+      decisions: [
+        {
+          input_name: 'crushed garlic cloves',
+          action: 'existing' as const,
+          canonical_name: 'garlic cloves',
+          aisle: 'Produce' as const,
+        },
+      ],
+    };
+
+    await expect(
+      mapIngredients(validatingFakeClient([plausible], []), {
+        unknownNames: ['crushed garlic cloves'],
+        canonicalIngredients: CANONICAL,
+      }),
+    ).resolves.toEqual(plausible);
   });
 
   it('rejects unsafe names and undeclared quantity/note fields', async () => {
@@ -171,7 +226,7 @@ describe('semantic ingredient mapping task', () => {
 
   it('allows several aliases to teach one new canonical when their aisle agrees', async () => {
     const threeInputTask = await capturedTask([
-      'green onions',
+      'garlic clove',
       'black garlic',
       'fermented garlic',
     ]);
@@ -218,7 +273,7 @@ describe('semantic ingredient mapping task', () => {
           input_name: 'test ingredient alias',
           action: 'existing' as const,
           canonical_name: lastCanonical,
-          aisle: null,
+          aisle: 'Produce',
         },
       ],
     };
@@ -243,13 +298,13 @@ describe('semantic ingredient mapping task', () => {
     ).rejects.toThrow();
     await expect(
       mapIngredients(client, {
-        unknownNames: ['green onions', 'green onions'],
+        unknownNames: ['garlic clove', 'garlic clove'],
         canonicalIngredients: CANONICAL,
       }),
     ).rejects.toThrow(/duplicate/);
     await expect(
       mapIngredients(client, {
-        unknownNames: ['green onions'],
+        unknownNames: ['garlic clove'],
         canonicalIngredients: [
           CANONICAL[0],
           CANONICAL[0],
@@ -273,10 +328,10 @@ describe('semantic ingredient mapping task', () => {
         completion({
           decisions: [
             {
-              input_name: 'green onions',
+              input_name: 'garlic clove',
               action: 'existing',
               canonical_name: 'green onion',
-              aisle: null,
+              aisle: 'Produce',
             },
           ],
         }),
@@ -285,10 +340,10 @@ describe('semantic ingredient mapping task', () => {
         completion({
           decisions: [
             {
-              input_name: 'green onions',
+              input_name: 'garlic clove',
               action: 'existing',
-              canonical_name: 'scallions',
-              aisle: null,
+              canonical_name: 'garlic cloves',
+              aisle: 'Produce',
             },
           ],
         }),
@@ -298,17 +353,17 @@ describe('semantic ingredient mapping task', () => {
       mapIngredients(
         createStructuredOutputClient({ transport: { create } }),
         {
-          unknownNames: ['green onions'],
+          unknownNames: ['garlic clove'],
           canonicalIngredients: CANONICAL,
         },
       ),
     ).resolves.toEqual({
       decisions: [
         {
-          input_name: 'green onions',
+          input_name: 'garlic clove',
           action: 'existing',
-          canonical_name: 'scallions',
-          aisle: null,
+          canonical_name: 'garlic cloves',
+          aisle: 'Produce',
         },
       ],
     });
@@ -361,7 +416,7 @@ describe('semantic ingredient mapping task', () => {
     await mapIngredients(
       createStructuredOutputClient({ transport: { create } }),
       {
-        unknownNames: ['green onions', 'black garlic'],
+        unknownNames: ['garlic clove', 'black garlic'],
         canonicalIngredients: CANONICAL,
       },
     );
@@ -370,7 +425,7 @@ describe('semantic ingredient mapping task', () => {
       create.mock.calls[0]![0].response_format,
     );
     expect(wireSchema).toContain(
-      '"enum":["green onions","black garlic"]',
+      '"enum":["garlic clove","black garlic"]',
     );
     expect(wireSchema).toContain(
       '"enum":["scallions","garlic cloves","olive oil"]',
@@ -379,7 +434,7 @@ describe('semantic ingredient mapping task', () => {
 });
 
 async function capturedTask(
-  unknownNames: readonly string[] = ['green onions', 'black garlic'],
+  unknownNames: readonly string[] = ['garlic clove', 'black garlic'],
 ): Promise<StructuredOutputTask<unknown>> {
   const captured: StructuredOutputTask<unknown>[] = [];
   const decisions = unknownNames.map((inputName, index) =>
@@ -387,8 +442,8 @@ async function capturedTask(
       ? {
           input_name: inputName,
           action: 'existing' as const,
-          canonical_name: 'scallions',
-          aisle: null,
+          canonical_name: 'garlic cloves',
+          aisle: 'Produce',
         }
       : {
           input_name: inputName,

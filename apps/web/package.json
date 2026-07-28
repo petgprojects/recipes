@@ -10,10 +10,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@auth/drizzle-adapter": "1.11.3",
     "@recipes/db": "workspace:*",
     "@recipes/shared": "workspace:*",
     "@tanstack/react-query": "^5.101.4",
     "next": "^15.5.22",
+    "next-auth": "5.0.0-beta.32",
     "pg-boss": "12.26.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"

@@ -36,10 +36,11 @@ const nonEmpty = z
     return trimmed === undefined || trimmed === '' ? undefined : trimmed;
   });
 
-const booleanString = z
-  .enum(['true', 'false'])
-  .default('true')
-  .transform((value) => value === 'true');
+const booleanString = (fallback: 'true' | 'false') =>
+  z
+    .enum(['true', 'false'])
+    .default(fallback)
+    .transform((value) => value === 'true');
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -68,7 +69,7 @@ const envSchema = z.object({
    * A fresh database gets one scan immediately instead of waiting until 3am.
    * Disable this for startup smoke tests or deliberately cron-only deployments.
    */
-  SCAN_BOOTSTRAP_ENABLED: booleanString,
+  SCAN_BOOTSTRAP_ENABLED: booleanString('true'),
 
   // ── Phase 2 — Reddit ─────────────────────────────────────────────────────
   REDDIT_CLIENT_ID: nonEmpty,
@@ -79,6 +80,25 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: nonEmpty,
   GOOGLE_CLIENT_SECRET: nonEmpty,
   AUTH_SECRET: nonEmpty,
+  /**
+   * Treat an unauthenticated development request as the seeded `dev@local`
+   * user (PLAN.md §4). **Off by default** — see PROGRESS.md amendment A15.
+   * Phase 4 has to be able to exercise the signed-out planner and the
+   * first-sign-in migration, and an automatic fallback makes both unreachable
+   * in the only environment that exists. Ignored when `NODE_ENV=production`.
+   */
+  DEV_AUTH_FALLBACK: booleanString('false'),
+
+  /**
+   * Auth.js's public origin. Read by Auth.js straight from `process.env`; it is
+   * declared here so a bad value fails at boot with the rest of them.
+   *
+   * Must be set whenever the server is bound to `0.0.0.0` (every container),
+   * because Auth.js would otherwise infer `http://0.0.0.0:3000` from
+   * `request.url` and send that as the OAuth `redirect_uri` — which Google
+   * rejects as a policy violation. docker-compose.yml sets it for you.
+   */
+  AUTH_URL: z.url().default('http://localhost:3000'),
 
   // ── Web ──────────────────────────────────────────────────────────────────
   NEXT_PUBLIC_APP_URL: z.url().default('http://localhost:3000'),

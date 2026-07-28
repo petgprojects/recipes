@@ -23,3 +23,7 @@ coverage/
 /recipe-images/
 # RECIPE_IMAGES_DIR when the worker runs natively instead of under compose
 /data/
+
+# Google OAuth client downloads. The values belong in .env; the file itself is
+# a credential and must never be committed.
+client_secret_*.json

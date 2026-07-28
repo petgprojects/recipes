@@ -300,6 +300,22 @@
 }
 .mp-ops-link:hover { color: var(--beet); border-color: var(--beet); }
 
+/* ---- account (Phase 4) ---- */
+/* Lives in the eyebrow next to the ops link, in the same mono micro-type, so
+   signing in reads as a utility rather than as the point of the page. */
+.mp-eyebrow-end { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.mp-auth { display: flex; align-items: baseline; gap: 8px; }
+.mp-auth-who {
+  max-width: 18ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--slate);
+}
+.mp-auth-btn {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--beet-soft);
+  border-bottom: 1.5px solid var(--line); padding: 0;
+}
+.mp-auth-btn:hover { color: var(--beet); border-color: var(--beet); }
+
 /* ---- "N new recipes" ---- */
 /* A button, not a toast: nothing moves until the reader asks for it
    (PLAN.md §5). Sticky under the tab bar so it survives a long scroll. */

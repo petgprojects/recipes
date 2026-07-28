@@ -13,17 +13,26 @@ Do not restart completed phases or re-research facts already recorded there.
 
 ## Current checkpoint
 
-- Phase 0 through Phase 3 are complete.
-- Resume at **Phase 4: auth** — it needs `GOOGLE_CLIENT_ID`,
-  `GOOGLE_CLIENT_SECRET` and `AUTH_SECRET` in `.env` first.
+- Phase 0 through Phase 4 are complete.
+- Resume at **Phase 5: grocery list server-side** — port the aggregation in
+  `@recipes/shared/grocery.ts` to SQL over
+  `saved_recipes × recipe_ingredients × ingredients`. The per-user check-offs
+  already key on `grocery_checks.item_key`, so they need no migration.
+- Auth.js v5 + Google is live over the existing `users`/`accounts`/`sessions`
+  tables. `AUTH_URL` must stay pinned in `docker-compose.yml`: the container
+  binds `0.0.0.0`, and Google rejects a `0.0.0.0` `redirect_uri` at the
+  token-exchange step (amendment A16). `trustHost` alone does not fix it.
+- The planner works signed out; auth adds persistence and is not a gate. The
+  `dev@local` fallback is opt-in via `DEV_AUTH_FALLBACK` (A15).
 - The verified Phase 2 exit has 425 recipes: 235 active, 190 rejected and zero
   pending, with zero duplicate source URLs.
 - Semantic enrichment mapped 4,456 of 4,617 ingredient rows. The remaining 161
   compound/alternative lines intentionally retain renderable `raw_text` and
   are a successful terminal condition, not retryable failures.
-- The planner UI at `/` is live: server-rendered browse, cached photos, picks
-  and grocery receipt in `localStorage`, TanStack Query polling and the
-  "N new recipes" pill. `meal-prep-planner.jsx` is retired.
+- The planner UI at `/` is live: server-rendered browse, cached photos,
+  TanStack Query polling and the "N new recipes" pill. `meal-prep-planner.jsx`
+  is retired. Picks and check-offs live in `localStorage` when signed out and in
+  `saved_recipes` / `grocery_checks` when signed in, behind one store interface.
 - Serious Eats is approved and enabled.
 - Classpop is intentionally removed everywhere.
 - GypsyPlate currently returns HTTP 403 for both sitemap endpoints. Its run is
@@ -98,11 +107,25 @@ docker compose up -d
 `docker compose down -v` remains the right command for a deliberate clean
 reset, and only for that.
 
+Do **not** start a second web instance in this Compose project (for example
+`docker compose run … web`): it shares the `web-next` volume with the running
+server, and two dev servers writing one `.next` corrupts it — the page goes
+blank with `ENOENT … /.next/server/pages/_document.js`. Recover with:
+
+```bash
+docker compose stop web && docker compose rm -f web
+docker volume rm recipes_web-next
+docker compose up -d web
+```
+
+The volume is build output, so nothing is lost. Use `-p <other-project>` if a
+second instance is genuinely needed.
+
 ## Verification baseline
 
-At the Phase 3 checkpoint:
+At the Phase 4 checkpoint:
 
-- `corepack pnpm test` (with `DATABASE_URL`) — 551 passing (shared 72, db 20,
+- `corepack pnpm test` (with `DATABASE_URL`) — 564 passing (shared 85, db 20,
   worker 459).
 - `corepack pnpm typecheck` — clean across all workspaces.
 - Production Next.js build — passing.
@@ -116,9 +139,12 @@ unit tests.
 ## Credentials
 
 - `OPENROUTER_API_KEY` is configured in local `.env`. Never print or commit it.
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `AUTH_SECRET` are configured in
+  local `.env` and verified end to end against the real Google client. Never
+  print or commit them.
 - Reddit credentials remain unavailable; the production-wired Reddit adapter
-  is disabled and does not block Phase 3.
-- Google OAuth client and test user are configured with callback
-  `http://localhost:3000/api/auth/callback/google`. The client ID/secret and
-  `AUTH_SECRET` still need to be placed in `.env` before Phase 4.
+  is disabled and does not block later phases.
+- The Google OAuth client and its test user use the callback
+  `http://localhost:3000/api/auth/callback/google`. Changing the app's host or
+  port means updating both that registration and `AUTH_URL`.
 - Never print or commit secrets from `.env`.

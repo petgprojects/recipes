@@ -4,6 +4,7 @@
  */
 
 import { useQueries, useQuery, type UseQueryResult } from '@tanstack/react-query';
+import type { CheckedMap, PlannerState, SavedMap } from '@recipes/shared/planner';
 import type { RecipeDetail, RecipeSummary } from './recipe-types';
 
 /** PLAN.md §5: "TanStack Query with `refetchInterval` (~5 min)". */
@@ -17,22 +18,68 @@ export const recipeKeys = {
   detail: (id: string) => ['recipes', 'detail', id] as const,
 };
 
+/**
+ * A module-level constant, not a fresh array per call like `recipeKeys` above.
+ * Those are parameterised, so a new array is unavoidable; this one is not, and
+ * the difference matters: it is used as a `useEffect` dependency, where a new
+ * array identity on every render re-runs the effect (and its cleanup) forever.
+ */
+const PLANNER_STATE_KEY = ['planner', 'state'] as const;
+
+export const plannerKeys = {
+  state: () => PLANNER_STATE_KEY,
+};
+
+/**
+ * Carries the status alongside the message. The planner needs to tell a 401
+ * ("your session ended — stop pretending these saves are landing") apart from a
+ * 503 ("the database blinked — this will retry"), and the two want very
+ * different words in front of the reader.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(status: number, detail: string) {
+    // Message shape preserved from Phase 3: the browse-error banner renders it.
+    super(`${status} ${detail}`);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+async function readError(response: Response): Promise<ApiError> {
+  const detail = await response
+    .json()
+    .then((body: unknown) =>
+      typeof body === 'object' && body !== null && 'error' in body
+        ? String((body as { error: unknown }).error)
+        : response.statusText,
+    )
+    .catch(() => response.statusText);
+  return new ApiError(response.status, detail);
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { headers: { accept: 'application/json' } });
   if (!response.ok) {
     // `/api/recipes` answers 503 rather than an empty list when the database is
     // unreachable, precisely so this can surface as an error instead of as
     // "you have no recipes".
-    const detail = await response
-      .json()
-      .then((body: unknown) =>
-        typeof body === 'object' && body !== null && 'error' in body
-          ? String((body as { error: unknown }).error)
-          : response.statusText,
-      )
-      .catch(() => response.statusText);
-    throw new Error(`${response.status} ${detail}`);
+    throw await readError(response);
   }
+  return (await response.json()) as T;
+}
+
+async function sendJson<T>(url: string, method: string, body?: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method,
+    headers:
+      body === undefined
+        ? { accept: 'application/json' }
+        : { accept: 'application/json', 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!response.ok) throw await readError(response);
   return (await response.json()) as T;
 }
 
@@ -82,4 +129,46 @@ export function useSavedRecipeDetails(ids: readonly string[]): UseQueryResult<Re
       staleTime: POLL_INTERVAL_MS,
     })),
   });
+}
+
+// ── Planner state (Phase 4) ─────────────────────────────────────────────────
+
+/**
+ * Every mutating planner endpoint answers with the *whole* state rather than
+ * just the row it touched. That is deliberate: it makes each response a
+ * complete correction of the cache, so a mutation that raced with another tab
+ * self-heals on the next round-trip instead of leaving the two out of step.
+ */
+export interface PlannerImportResult extends PlannerState {
+  savedAdded: number;
+  checkedAdded: number;
+  skipped: number;
+}
+
+export function fetchPlannerState(): Promise<PlannerState> {
+  return getJson<PlannerState>('/api/planner');
+}
+
+/** `batches: null` unpicks. */
+export function savePlannerRecipe(recipeId: string, batches: number | null): Promise<PlannerState> {
+  return sendJson<PlannerState>('/api/planner/saved', 'PATCH', { recipeId, batches });
+}
+
+export function clearPlannerSaved(): Promise<PlannerState> {
+  return sendJson<PlannerState>('/api/planner/saved', 'DELETE');
+}
+
+export function setPlannerCheck(itemKey: string, checked: boolean): Promise<PlannerState> {
+  return sendJson<PlannerState>('/api/planner/checks', 'PATCH', { itemKey, checked });
+}
+
+export function clearPlannerChecks(): Promise<PlannerState> {
+  return sendJson<PlannerState>('/api/planner/checks', 'DELETE');
+}
+
+export function importPlannerState(local: {
+  saved: SavedMap;
+  checked: CheckedMap;
+}): Promise<PlannerImportResult> {
+  return sendJson<PlannerImportResult>('/api/planner/import', 'POST', local);
 }

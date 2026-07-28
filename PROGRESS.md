@@ -13,12 +13,12 @@ on Peter**.
 |---|---|---|
 | `OPENROUTER_API_KEY` | Phase 2 | ✅ configured in local `.env` (never printed or committed) |
 | Reddit API credentials | Phase 2 (Reddit source only) | ⛔ blocked — see below |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Phase 4 | ◐ OAuth client + test user configured; values not yet copied into `.env` |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `AUTH_SECRET` | Phase 4 | ✅ configured in local `.env` (never printed or committed) |
 
-Google OAuth is configured to redirect to the exact callback
+Google OAuth redirects to the exact callback
 `http://localhost:3000/api/auth/callback/google`, and Peter's email is an
-allowed test user. The local `.env` entries are still blank; that does not
-block work before Phase 4.
+allowed test user. All three Phase 4 secrets are now in the local `.env`, and a
+real end-to-end Google sign-in has been driven through the live app.
 
 **Reddit blocker.** App creation at reddit.com/prefs/apps fails with the
 "Responsible Builder Policy" message; browser console shows a 401 from
@@ -196,6 +196,77 @@ any consumer asking "what changed since X".
    local-network app, cards reserve the 16:9 box in `--blush` and fill it when
    the image lands. The column stays for whenever that changes.
 
+### A15 — The `dev@local` fallback is opt-in, not automatic
+*Phase 4.*
+
+PLAN.md §4 says `getCurrentUser()` "returns [`dev@local`] when
+`NODE_ENV !== 'production'` and no session is present". It is implemented, but
+behind `DEV_AUTH_FALLBACK=true`, **default off**.
+
+The reason the plan gave for the fallback was scaffolding: it let Phases 1–3
+exercise the `user_id` columns "before Auth.js exists". Phase 4 is Auth.js
+existing, and two of Phase 4's own requirements contradict an automatic
+fallback — the planner must keep working *signed out* (auth adds persistence,
+it does not become a gate), and `localStorage` picks must migrate on *first
+sign-in*. If every development request is silently `dev@local`, there is no
+signed-out state and no first sign-in, so neither is reachable in the only
+environment that exists. Both were verified live only because the fallback
+defaults off.
+
+The capability is preserved rather than deleted: one env var restores the
+documented behaviour, and it is ignored outright when `NODE_ENV=production`, so
+production still means "no session, no user".
+
+### A16 — `AUTH_URL` must be pinned, because `0.0.0.0` fails at the last hop
+*Phase 4. Found by driving a real Google sign-in; not caught by any test.*
+
+The container runs `next dev --hostname 0.0.0.0` so it is reachable from the
+host. That makes `request.url` inside a route handler read
+`http://0.0.0.0:3000`, and Auth.js derives its base URL from it — so the
+`redirect_uri` it sends in the **token exchange** becomes
+`http://0.0.0.0:3000/api/auth/callback/google`.
+
+Google allows loopback only as `localhost` or `127.0.0.1`. It rejects
+`0.0.0.0` with `invalid_request` and the message *"this app doesn't comply with
+Google's OAuth 2.0 policy for keeping apps secure"* — which reads like an app
+registration or verification problem and is not one.
+
+The failure is nastily late. The *authorize* step is built in a server-action
+context where the host is correct, so the consent screen appears with a
+perfectly good `redirect_uri=http://localhost:3000/...`; only the final
+server-to-server exchange uses the wrong origin. Everything looks right until
+the last hop, and the user lands on a generic `?error=Configuration` page.
+
+`docker-compose.yml` therefore sets `AUTH_URL` from `NEXT_PUBLIC_APP_URL`, and
+`AUTH_URL` is declared in `packages/shared/src/env.ts` so a bad value fails at
+boot with the rest. **`trustHost: true` alone does not fix this** — it governs
+whether forwarded host headers are believed, not what `request.url` reports.
+
+### A17 — Planner state is server-authoritative, and a migration only adds
+*Phase 4.*
+
+Three rules the code depends on, recorded because each has a plausible-looking
+wrong version:
+
+1. **Every mutating `/api/planner/*` endpoint returns the whole state**, not the
+   row it touched. Each response is then a complete correction of the client
+   cache, so a mutation that raced another tab self-heals on the next
+   round-trip. This is also why the four TanStack mutations share one
+   `scope: { id: 'planner-state' }`: without it they run concurrently, and a
+   slow early response overwriting a fast later one would resurrect stale state.
+2. **The first-sign-in migration is additive and idempotent.** On a conflict the
+   *account* wins — a recipe saved at two batches is not reset to the one batch
+   an anonymous session in this browser happened to leave. It can only add, so
+   re-running is safe, which matters because the "already migrated" marker lives
+   in the same `localStorage` the migration reads.
+3. **A pick whose recipe no longer exists is skipped, not fatal.**
+   `saved_recipes.recipe_id` is a foreign key, so one stale id would otherwise
+   abort the whole insert and lose every other pick with it.
+
+Signed-in edits deliberately do **not** write to `localStorage`. The browser's
+anonymous state is left exactly as it was, so signing out returns to it rather
+than to a half-copy of the account.
+
 ### A3 — Source list resolved (PLAN.md §8, open question 11)
 Budget Bytes, Pinch of Yum, Downshiftology, GypsyPlate, Skinnytaste, The
 Kitchn, Love & Lemons, Serious Eats.
@@ -287,7 +358,25 @@ removes it structurally.
       photos, picks → grocery receipt → check-off round-trip persisting across a
       reload, the pill counting exactly one probe row and clearing on click, no
       horizontal overflow at 390px or 1280px, and no page or console errors.*
-- [ ] **Phase 4 — Auth.** Auth.js + Google, localStorage migration on first sign-in.
+- [x] **Phase 4 — Auth.** ✅ **COMPLETE.**
+    - [x] Auth.js v5 + Google provider + Drizzle adapter over the existing
+          `users`/`accounts`/`sessions`/`verification_tokens` tables (no migration)
+    - [x] `AUTH_URL` pinned so the token-exchange `redirect_uri` is never
+          `0.0.0.0` (A16)
+    - [x] `getCurrentUser()` with the opt-in `dev@local` fallback (A15)
+    - [x] `saved_recipes` / `grocery_checks` served by `/api/planner{,/saved,/checks,/import}`
+    - [x] Dual-mode planner store: `localStorage` signed out, optimistic
+          server mutations signed in — auth is not a gate
+    - [x] One-time first-sign-in migration, additive and idempotent (A17)
+    - [x] Sign-in/sign-out via server actions in the masthead eyebrow
+      *Exit verified live against the real Google client: signed-out picks and
+      check-offs persisting in `localStorage` across a reload; a real Google
+      sign-in creating the `users` + `accounts` rows; 2 picks and 2 ticked items
+      migrating into the account on first sign-in with the notice shown; a third
+      pick added while signed in surviving a reload; `localStorage` untouched by
+      signed-in edits; sign-out returning to the browser's own 2 picks with
+      `/api/planner` answering 401. Merge semantics, idempotence and the
+      stale-recipe skip additionally exercised against a minted session.*
 - [ ] **Phase 5 — Grocery list server-side.** SQL aggregation, per-user checks,
       print + copy-to-clipboard.
 - [ ] **Phase 6 — Ratings.** 1–5 stars, notes, fixed-vocabulary aspect tags.
@@ -521,3 +610,71 @@ raising exactly "1 new recipe — show it" and clearing on click (row removed
 afterwards; the database is back to 425), every cached image blocked degrading
 to the text-only card with zero broken frames, and no horizontal overflow at
 390px or 1280px. `/ops` and its link back to the planner still work.
+
+### 2026-07-27 — Phase 4 complete: multi-user, saves persist across devices
+
+**What auth actually needed.** Nothing in the schema. `users`, `accounts`,
+`sessions` and `verification_tokens` were shaped for the Auth.js adapter back in
+Phase 0, so Phase 4 added two dependencies and zero migrations. The one snag was
+a type, not a column: `users.email` is `citext` (PLAN.md §4, so `A@b.com` and
+`a@b.com` cannot become two accounts), Drizzle types a `customType` as
+`PgCustomColumn`, and the adapter's schema type only admits `PgVarchar | PgText`.
+`citext` *is* text at runtime and every adapter query against it is a plain
+equality, so the fix is one cast confined to that single expression rather than
+loosening anything in the schema.
+
+**Auth is optional at boot, on purpose.** The three Phase 4 secrets stay
+phase-gated in `@recipes/shared/env`. `isAuthConfigured` reports whether they are
+present; without them the provider list is empty, the sign-in control does not
+render, and the planner runs exactly as it did in Phase 3. Calling `requireEnv()`
+at module scope would have made importing `lib/auth.ts` a boot requirement and
+taken the whole planner down with it — which is the opposite of "auth adds
+persistence, it does not become a gate".
+
+**The bug only a browser could find.** A real Google sign-in failed at the very
+last hop with `?error=Configuration`, from Google, saying the app "doesn't
+comply with Google's OAuth 2.0 policy for keeping apps secure" — a message that
+reads like an app-registration problem and is not one. `next dev --hostname
+0.0.0.0` makes `request.url` read `http://0.0.0.0:3000`, so the token-exchange
+`redirect_uri` became `http://0.0.0.0:3000/...`, and Google allows loopback only
+as `localhost` or `127.0.0.1`. The authorize step is built in a server-action
+context where the host is right, so the consent screen looks perfect and only
+the final server-to-server call is wrong. `AUTH_URL` is now pinned in
+docker-compose; `trustHost` alone does not fix it. Amendment A16.
+
+**The second bug only a browser could find.** After signing in, the migration
+ran, the account was correct in Postgres, the marker was written — and the UI
+showed nothing. `plannerKeys.state()` returned a fresh array per call, so it was
+an unstable `useEffect` dependency; the effect re-ran every render, its cleanup
+set `cancelled = true`, and the in-flight import's `.then` bailed out *after*
+writing the "already migrated" marker but *before* updating the cache. Worst
+shape of failure available: durably marked done, visibly undone, and
+self-suppressing on retry. The key is now a module constant, the effect depends
+on `user?.id`, and the cleanup is gone — an unmount must not abandon an import
+whose marker is written on resolve.
+
+**Where the logic went.** Shapes, wire schemas and merge rules are in
+`@recipes/shared/planner` (13 new tests) because the API routes and the client
+both have to agree with them; the SQL is in `apps/web/src/lib/planner.ts`, the
+same split as `grocery.ts` ↔ `lib/recipes.ts`. The store keeps its Phase 3
+interface and swaps backends underneath, so the components were untouched apart
+from receiving `user`. Amendment A17 records the three rules that have plausible
+wrong versions: whole-state responses, additive-and-idempotent migration with
+the account winning conflicts, and a stale recipe id skipping rather than
+aborting the batch.
+
+**Verification.** 564 tests passing (shared 85, db 20, worker 459) with the
+Compose database up, all four typechecks clean, production build clean, and the
+three Phase 4 secrets confirmed absent from every file in the client bundle.
+Driven live in Chrome against the real Google client: signed-out picks and
+check-offs persisting in `localStorage` across a reload; a real sign-in creating
+the `users` and `accounts` rows; 2 picks and 2 ticked items migrating on first
+sign-in with "Moved 2 picks and 2 ticked items from this browser into your
+account"; a reload showing no second migration; a third pick added while signed
+in surviving a reload; `localStorage` still holding its own 2 picks untouched by
+signed-in edits; sign-out returning to those 2 with `/api/planner` answering
+401. Merge semantics, idempotence, the stale-recipe skip and both
+`DEV_AUTH_FALLBACK` states were exercised against a minted session and a
+throwaway second instance. All probe rows removed; the database is back to 425
+recipes, 235 active, 190 rejected, 0 pending, with no `saved_recipes` or
+`grocery_checks` rows.

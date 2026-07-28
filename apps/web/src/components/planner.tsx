@@ -23,9 +23,11 @@ import {
   countGroceryItems,
   type GroceryRecipeInput,
 } from '@recipes/shared/grocery';
+import type { PlannerState } from '@recipes/shared/planner';
 import { useRecipesQuery, useSavedRecipeDetails } from '@/lib/api';
-import { usePlannerStore } from '@/lib/saved-store';
+import { usePlannerStore, type PlannerUser } from '@/lib/saved-store';
 import type { RecipeSummary } from '@/lib/recipe-types';
+import { AuthControls } from './auth-controls';
 import { GroceryReceipt } from './grocery-receipt';
 import { PicksList } from './picks-list';
 import { RecipeCard } from './recipe-card';
@@ -33,17 +35,33 @@ import { RecipeSheet } from './recipe-sheet';
 
 type Tab = 'browse' | 'picks' | 'list';
 
-interface PlannerProps {
-  initialRecipes: RecipeSummary[];
+/** "1 pick" / "3 picks" — the migration notice reads as a sentence either way. */
+function countLabel(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
-export function Planner({ initialRecipes }: PlannerProps) {
+interface PlannerProps {
+  initialRecipes: RecipeSummary[];
+  /** The signed-in reader, resolved server-side. `null` is a normal state. */
+  user: PlannerUser | null;
+  /** That reader's picks as of the server render; absent when signed out. */
+  initialPlannerState?: PlannerState;
+  /** Whether Google sign-in is configured at all (Phase 4 secrets present). */
+  authEnabled: boolean;
+}
+
+export function Planner({
+  initialRecipes,
+  user,
+  initialPlannerState,
+  authEnabled,
+}: PlannerProps) {
   const [tab, setTab] = useState<Tab>('browse');
   const [category, setCategory] = useState<string>(CATEGORY_FILTER_ALL);
   const [openId, setOpenId] = useState<string | null>(null);
   const [shown, setShown] = useState<RecipeSummary[]>(initialRecipes);
 
-  const store = usePlannerStore();
+  const store = usePlannerStore(user, initialPlannerState);
   const { data: live, isError, error, isFetching } = useRecipesQuery(initialRecipes);
 
   const shownIds = useMemo(() => new Set(shown.map((recipe) => recipe.id)), [shown]);
@@ -133,9 +151,12 @@ export function Planner({ initialRecipes }: PlannerProps) {
         <header className="mp-head">
           <div className="mp-eyebrow">
             {shown.length} recipes · sourced &amp; credited
-            <a className="mp-ops-link" href="/ops">
-              Operations
-            </a>
+            <span className="mp-eyebrow-end">
+              <a className="mp-ops-link" href="/ops">
+                Operations
+              </a>
+              <AuthControls user={user} enabled={authEnabled} />
+            </span>
           </div>
           <h1 className="mp-title">
             Cook once.
@@ -167,6 +188,16 @@ export function Planner({ initialRecipes }: PlannerProps) {
             {incoming.length} new {incoming.length === 1 ? 'recipe' : 'recipes'} — show{' '}
             {incoming.length === 1 ? 'it' : 'them'}
           </button>
+        )}
+
+        {store.migration !== null && (
+          <p className="mp-note">
+            Moved {countLabel(store.migration.savedAdded, 'pick')} and{' '}
+            {countLabel(store.migration.checkedAdded, 'ticked item')} from this browser into your
+            account.
+            {store.migration.skipped > 0 &&
+              ` ${countLabel(store.migration.skipped, 'pick')} could not come over — those recipes are no longer in the feed.`}
+          </p>
         )}
 
         {store.warning !== '' && <p className="mp-note">{store.warning}</p>}

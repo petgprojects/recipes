@@ -1,7 +1,7 @@
 # Session Handoff
 
 **Read this first, then `PROGRESS.md`, then the relevant parts of `PLAN.md`.**
-Written 2026-07-27 after the verified Phase 3 exit.
+Written 2026-07-27 after the verified Phase 4 exit.
 
 `PLAN.md` remains the original design. `PROGRESS.md` is the authoritative live
 record; its amendments override `PLAN.md` where they disagree.
@@ -16,11 +16,12 @@ record; its amendments override `PLAN.md` where they disagree.
 | 1 — Deterministic ingestion | ✅ complete |
 | 2 — LLM enrichment | ✅ complete |
 | 3 — UI port | ✅ complete |
-| 4 — Auth | **resume here** |
-| 5–7 | not started |
+| 4 — Auth | ✅ complete |
+| 5 — Grocery list server-side | **resume here** |
+| 6–7 | not started |
 
-Phase 2 is committed in `8202b4c`, `3f6e67d` and `5c90c5a`. Phase 3 is the next
-commit; `meal-prep-planner.jsx` is deleted in it and lives on in git history.
+Phase 2 is committed in `8202b4c`, `3f6e67d` and `5c90c5a`; Phase 3 in
+`b0e0121`. Phase 4 is the next commit.
 
 ### Verified live state
 
@@ -28,24 +29,61 @@ commit; `meal-prep-planner.jsx` is deleted in it and lives on in git history.
 - 4,617 ingredient rows, 4,456 mapped, 161 intentionally unmapped and still
   renderable from `raw_text`.
 - 774 canonical ingredients, 1,727 aliases.
+- Two `users` rows: the seeded `dev@local`, and Peter's Google account with one
+  linked `accounts` row. No `saved_recipes` or `grocery_checks` rows — every
+  Phase 4 probe row was removed after verification.
 - Recorded OpenRouter usage to date: 1,364,931 input tokens, 568,637 output
-  tokens, **$0.311476**. Phase 3 spent nothing — the UI makes no LLM calls.
+  tokens, **$0.311476**. Phases 3 and 4 spent nothing — neither makes LLM calls.
 
 ### Verification at this checkpoint
 
 - `DATABASE_URL=postgresql://recipes:recipes@localhost:5432/recipes corepack
-  pnpm test` — **551 passing** (shared 72, db 20, worker 459). Without
+  pnpm test` — **564 passing** (shared 85, db 20, worker 459). Without
   `DATABASE_URL` in the environment, four database-backed worker suites fail to
   load; that is the documented requirement, not a regression.
 - `corepack pnpm typecheck` — clean across all four workspaces.
 - `DATABASE_URL=… corepack pnpm --filter @recipes/web build` — passing.
+- The three Phase 4 secrets confirmed absent from every file in
+  `apps/web/.next/static` after a production build.
 - Compose db/web healthy, worker running; `/api/health` 200, `/ops` 200,
   `/api/recipes` 200, `/api/recipes/:id` 200, `/api/images/:file` 200.
-- Driven live in headless Chrome (see the Phase 3 log entry in `PROGRESS.md`
-  for the full list): picks → receipt → check-off persistence, the pill, the
-  detail sheet, the no-photo fallback, 390px and 1280px widths.
+- Driven live in Chrome against the **real** Google OAuth client — see the
+  Phase 4 log entry in `PROGRESS.md` for the full list.
 
 ---
+
+## Phase 4 rules that must be preserved
+
+- **`AUTH_URL` must be pinned** (amendment A16). The container runs
+  `next dev --hostname 0.0.0.0`, which makes `request.url` read
+  `http://0.0.0.0:3000`, so Auth.js would send that as the token-exchange
+  `redirect_uri` and Google rejects it as an OAuth policy violation. The
+  authorize step looks perfect and only the last server-to-server hop fails, so
+  this presents as a generic `?error=Configuration`. `trustHost: true` does
+  **not** fix it. `docker-compose.yml` sets `AUTH_URL` from `NEXT_PUBLIC_APP_URL`.
+- **Auth must stay optional at boot.** The three Phase 4 secrets are phase-gated;
+  `isAuthConfigured` gates the provider list and the sign-in control. Never call
+  `requireEnv()` at module scope in `lib/auth.ts` — it would make importing the
+  file a boot requirement and take the signed-out planner down with it.
+- **The `dev@local` fallback is opt-in** (`DEV_AUTH_FALLBACK`, default off,
+  amendment A15). Turning it on makes every development request permanently
+  signed in, which makes the signed-out planner and the first-sign-in migration
+  unreachable. Production ignores it.
+- **Every mutating `/api/planner/*` endpoint returns the whole state**, and the
+  four client mutations share `scope: { id: 'planner-state' }` so they serialise.
+  Without the scope, a slow early response overwrites a fast later one.
+- **The migration only adds, and the account wins conflicts** (A17). It must stay
+  idempotent: the "already migrated" marker lives in the same `localStorage` the
+  migration reads, so a cleared browser re-runs it.
+- **Signed-in edits must not write to `localStorage`** — that is what `active`
+  gates in `useLocalPlannerStore`. The browser's anonymous state is left intact
+  so signing out returns to it.
+- **`plannerKeys.state()` returns a module constant, not a fresh array.** It is a
+  `useEffect` dependency; a new identity per render re-runs the effect and its
+  cleanup, which previously discarded an in-flight migration *after* its marker
+  was written. See the Phase 4 log entry.
+- `users.email` is `citext`, which the Drizzle adapter's types reject. The cast
+  stays confined to the one `DrizzleAdapter(...)` expression.
 
 ## Phase 3 rules that must be preserved
 
@@ -93,10 +131,10 @@ commit; `meal-prep-planner.jsx` is deleted in it and lives on in git history.
 ## Credentials and source state
 
 - `OPENROUTER_API_KEY` is configured in `.env`. Never print or commit it.
-- **Phase 4 needs `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `AUTH_SECRET`
-  placed in `.env`.** The OAuth client and test user already exist, with the
-  callback `http://localhost:3000/api/auth/callback/google`. This is the one
-  thing blocking the next phase from starting cleanly.
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `AUTH_SECRET` are configured in
+  `.env` and verified end to end against the real Google client. Never print or
+  commit them. The registered callback is
+  `http://localhost:3000/api/auth/callback/google`.
 - Reddit credentials remain unavailable; the Reddit adapter is production-wired
   and `enabled=false`.
 - Serious Eats is approved and enabled; Classpop is intentionally absent.
@@ -115,38 +153,47 @@ commit; `meal-prep-planner.jsx` is deleted in it and lives on in git history.
   the stale anonymous dependency volumes:
   `docker compose build && docker compose rm -svf web worker migrate &&
   docker compose up -d`. `rm -sv` removes anonymous volumes only; named volumes
-  survive. This is how `@tanstack/react-query` was added in Phase 3.
+  survive. This is how `next-auth` was added in Phase 4.
+- **Do not run a second web instance against the same Compose project.** A
+  throwaway `docker compose run … web` shares the `web-next` volume with the
+  running server, and two dev servers writing one `.next` corrupts it — the page
+  goes blank with `ENOENT … /.next/server/pages/_document.js`. Recovery is
+  `docker compose stop web && docker compose rm -f web && docker volume rm
+  recipes_web-next && docker compose up -d web`; the volume is build output, so
+  nothing is lost. Use `-p <other-project>` if a second instance is really needed.
 - `packages/shared` and `packages/db` export TypeScript directly; no build step.
-- `@recipes/shared/env` is server-only. The image route imports it; nothing in
-  `src/components` may. Client-facing types live in `src/lib/recipe-types.ts`
-  precisely so a component never has to import from a module that opens a pool.
+- `@recipes/shared/env` is server-only. `lib/auth.ts`, `lib/current-user.ts`,
+  `lib/planner.ts` and the route handlers import it; nothing in `src/components`
+  may. Client-facing types live in `src/lib/recipe-types.ts` and
+  `@recipes/shared/planner` precisely so a component never has to import from a
+  module that opens a pool.
 - Preserve the committed real-source HTML fixtures; tests must not crawl.
 
 ---
 
 ## Exact next move
 
-Start **Phase 4 — Auth** (`PLAN.md` §5):
+Start **Phase 5 — Grocery list server-side** (`PLAN.md` §5):
 
-1. Get `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `AUTH_SECRET` into `.env`.
-2. Wire Auth.js with the Drizzle adapter — `users`, `accounts`, `sessions` and
-   `verification_tokens` already match its expected shape, so no migration.
-3. Implement `getCurrentUser()` with the `dev@local` fallback described in
-   `PLAN.md` §4 (development only; production means no user without a session).
-4. Move picks and check-offs from `localStorage` into `saved_recipes` and
-   `grocery_checks`. The client shapes are already `{recipeId: batches}` and
-   `{itemKey: true}` under `mealprep:v2:saved` / `mealprep:v2:checked`, so the
-   one-time migration on first sign-in is a direct insert.
-5. Keep the planner working signed-out; auth adds persistence, it does not
-   become a gate.
+1. Port the aggregation in `@recipes/shared/grocery.ts` from its current
+   in-memory form to a SQL query over
+   `saved_recipes × recipe_ingredients × ingredients`, keeping the batch
+   multiplier and in-dimension unit conversion. The item key it produces is
+   already `grocery_checks.item_key`, so the per-user check-offs Phase 4 just
+   built need no migration.
+2. Keep the receipt aesthetic — it is the best part of the current design.
+3. Add a printable view and copy-to-clipboard as plain text.
 
-Known issue worth a look at some point, not a Phase 3 defect: spot-checking
-ingredient rows turned up a bad Phase 2 semantic mapping —
+The tests in `packages/shared/test/grocery.test.ts` are the specification for
+what the SQL has to reproduce; keep them passing against the new implementation
+rather than rewriting them to match it.
+
+**Worth doing before Phase 5 puts these joins under SQL:** a proper sampled
+audit of the Phase 2 semantic ingredient mapping. Spot-checking turned up
 `1 large bunch flat-leaf parsley (about 2 ounces; 57 g)…` mapped to canonical
 `mushrooms`. The row renders correctly from `raw_text`, but a wrong canonical
-merges wrongly on the grocery list. A crude probe (canonical name's first token
-absent from the raw line) flags 390 of the 4,456 mapped rows, and most of those
-are legitimate synonyms — `fresh herbs` for a parsley/dill/chives line,
-`scallions` for `green onions` — so the real error rate is unknown and needs a
-proper sampled audit. Worth scheduling before Phase 5 puts those joins under a
-SQL grocery aggregation.
+merges wrongly on the grocery list — and Phase 5 is exactly where that starts to
+matter. A crude probe (canonical name's first token absent from the raw line)
+flags 390 of the 4,456 mapped rows, but most of those are legitimate synonyms
+(`fresh herbs` for a parsley/dill/chives line, `scallions` for `green onions`),
+so the real error rate is still unknown.

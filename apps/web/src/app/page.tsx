@@ -13,9 +13,14 @@
  */
 
 import type { Metadata } from 'next';
+import type { PlannerState } from '@recipes/shared/planner';
 import { Planner } from '@/components/planner';
+import { isAuthConfigured } from '@/lib/auth';
+import { getCurrentUser } from '@/lib/current-user';
+import { readPlannerState } from '@/lib/planner';
 import { BROWSE_LIMIT, listRecipes } from '@/lib/recipes';
 import type { RecipeSummary } from '@/lib/recipe-types';
+import type { PlannerUser } from '@/lib/saved-store';
 import '@/styles/artifact.css';
 
 export const runtime = 'nodejs';
@@ -30,9 +35,19 @@ export const metadata: Metadata = {
 export default async function Home() {
   let recipes: RecipeSummary[] = [];
   let failure: string | null = null;
+  let user: PlannerUser | null = null;
+  let plannerState: PlannerState | undefined;
 
   try {
-    recipes = await listRecipes({ limit: BROWSE_LIMIT });
+    // Sequential rather than parallel on purpose: the picks read needs the user
+    // id, and a failed session lookup should not leave a dangling query.
+    user = await getCurrentUser();
+    const [rows, saved] = await Promise.all([
+      listRecipes({ limit: BROWSE_LIMIT }),
+      user === null ? Promise.resolve(undefined) : readPlannerState(user.id),
+    ]);
+    recipes = rows;
+    plannerState = saved;
   } catch (error: unknown) {
     failure = error instanceof Error ? error.message : String(error);
   }
@@ -61,5 +76,12 @@ export default async function Home() {
     );
   }
 
-  return <Planner initialRecipes={recipes} />;
+  return (
+    <Planner
+      initialRecipes={recipes}
+      user={user}
+      initialPlannerState={plannerState}
+      authEnabled={isAuthConfigured}
+    />
+  );
 }

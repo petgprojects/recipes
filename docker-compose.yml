@@ -40,6 +40,17 @@ x-app: &app
     # (`docker compose up db` + `pnpm dev`), and both need to be right.
     DATABASE_URL: postgresql://${POSTGRES_USER:-recipes}:${POSTGRES_PASSWORD:-recipes}@db:5432/${POSTGRES_DB:-recipes}
     NODE_ENV: development
+    # Auth.js's public origin. Required, and for a reason worth writing down:
+    # `next dev --hostname 0.0.0.0` (which the container needs, to be reachable
+    # from the host) makes `request.url` inside a route handler read
+    # `http://0.0.0.0:3000`. Auth.js derives its base URL from that, so the
+    # `redirect_uri` it sends in the Google *token exchange* becomes
+    # `http://0.0.0.0:3000/api/auth/callback/google` — which Google rejects with
+    # "doesn't comply with Google's OAuth 2.0 policy for keeping apps secure",
+    # because loopback is only allowed as `localhost` or `127.0.0.1`. The
+    # authorize step succeeds first, so the failure only shows up at the very
+    # last hop. Pinning the origin fixes it; `trustHost` alone does not.
+    AUTH_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
     # Phase 1 writes downscaled recipe images here; the volume is shared so web
     # can serve what worker downloaded.
     RECIPE_IMAGES_DIR: /app/data/images

@@ -11,6 +11,7 @@
     "./units": "./src/units.ts",
     "./format": "./src/format.ts",
     "./grocery": "./src/grocery.ts",
+    "./planner": "./src/planner.ts",
     "./schemas": "./src/schemas.ts",
     "./ingredients": "./src/ingredients.ts",
     "./scan-jobs": "./src/scan-jobs.ts",

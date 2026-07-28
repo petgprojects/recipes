@@ -140,6 +140,24 @@ export function createIngredientBackfillOrchestrator(
           }
           totals.unparseableRows = seenUnparseableLines.size;
           if (parsed.refs.length === 0) {
+            const remainingRows = await dependencies.countRemaining();
+            if (remainingRows === lines.length) {
+              // Every remaining row was inspected and is still renderable
+              // from raw_text, but none can produce a safe normalized
+              // identity. This is the intentional terminal condition for the
+              // semantic backfill, not a retryable failure.
+              return finishAndSummarize({
+                dependencies,
+                now,
+                runId,
+                startedAt,
+                status: 'success',
+                totals,
+                remainingRows,
+                budgetExhausted: false,
+                error: null,
+              });
+            }
             return finishPartial({
               dependencies,
               now,

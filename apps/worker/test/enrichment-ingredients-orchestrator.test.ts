@@ -140,7 +140,7 @@ describe('semantic ingredient backfill orchestrator', () => {
     );
   });
 
-  it('maps parseable rows once, then stops partial on an unparseable row', async () => {
+  it('maps parseable rows, then completes with renderable unparseable rows retained', async () => {
     const dependencies = baseDependencies([
       [
         line('recipe-empty', 0, '   '),
@@ -173,15 +173,41 @@ describe('semantic ingredient backfill orchestrator', () => {
       await createIngredientBackfillOrchestrator(dependencies).run();
 
     expect(summary).toMatchObject({
-      status: 'partial',
+      status: 'success',
       attemptedNames: 1,
       mappedRows: 1,
       remainingRows: 1,
       unparseableRows: 1,
-      error: expect.stringContaining('could not be parsed'),
+      error: null,
     });
     expect(dependencies.loadUnmappedLines).toHaveBeenCalledTimes(2);
     expect(dependencies.applyMappings).toHaveBeenCalledOnce();
+    expect(dependencies.finishRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'success',
+        processedCount: 1,
+        error: null,
+      }),
+    );
+  });
+
+  it('stays partial when the loaded unparseable window does not cover all remaining rows', async () => {
+    const dependencies = baseDependencies([
+      [line('recipe-window', 0, '   ')],
+    ]);
+    vi.mocked(dependencies.countRemaining).mockResolvedValue(2);
+
+    const summary =
+      await createIngredientBackfillOrchestrator(dependencies).run();
+
+    expect(summary).toMatchObject({
+      status: 'partial',
+      mappedRows: 0,
+      remainingRows: 2,
+      unparseableRows: 1,
+      error: expect.stringContaining('could not be parsed'),
+    });
+    expect(dependencies.mapIngredients).not.toHaveBeenCalled();
   });
 
   it('stops partial when a batch makes zero mapping progress', async () => {

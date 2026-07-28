@@ -130,6 +130,29 @@ and enrichment calls from racing past the cap. Malformed responses and repairs
 are charged immediately, and scan finalization cannot overwrite an already
 durable increment.
 
+### A12 — Live structured-output compatibility and terminal ingredient leftovers
+*Phase 2. Verified against the complete live backfill on 2026-07-27.*
+
+OpenRouter accepts the selected model's strict JSON Schema support, but its
+schema validator rejects JavaScript Unicode property regexes such as `\p{L}`.
+The provider-facing schema therefore omits only those unsupported `pattern`
+keywords; the original Zod schema still performs the stronger Unicode-aware
+validation locally. Malformed success envelopes with no `choices` enter the
+single guarded repair path instead of throwing a `TypeError`.
+
+Semantic ingredient requests use 20-name batches, exact input/canonical enums,
+deterministic normalization when an existing canonical is mislabeled `new`,
+and an explicit 180-second request deadline. These rules were required by the
+live provider: 40-name batches approached the reasoning/output cap, near-match
+canonical names escaped prompt-only constraints, and the SDK's nominal timeout
+did not stop several hung requests.
+
+Rows that cannot safely parse into a normalized ingredient identity remain
+renderable from `raw_text` with `ingredient_id = null`. Once every remaining
+row has been inspected and is unparseable, that is a successful terminal
+backfill condition rather than a retryable partial. The live exit retains 161
+such compound/alternative lines intentionally.
+
 ### A3 — Source list resolved (PLAN.md §8, open question 11)
 Budget Bytes, Pinch of Yum, Downshiftology, GypsyPlate, Skinnytaste, The
 Kitchn, Love & Lemons, Serious Eats.
@@ -197,9 +220,18 @@ removes it structurally.
     - [x] `/ops` page: last run, counts, cost, manual queue control
       *Exit verified from a clean stack: 425 real recipes, every row with a
       local image reference, 0 duplicate URLs, 0 tokens and $0 LLM cost.*
-- [ ] **Phase 2 — LLM enrichment.** ◐ **RESUME HERE.** OpenRouter client, suitability gate,
-      derived fields, HTML + Reddit extraction, blurbs, budget cap, backfill.
-      *Exit: recipes complete, junk filtered.*
+- [x] **Phase 2 — LLM enrichment.** ✅ **COMPLETE.**
+    - [x] Direct stateless OpenRouter strict-output client + bounded repair
+    - [x] Suitability gate, derived fields, blurbs and active/rejected publish
+    - [x] Durable usage accounting, serialized UTC-day budget and restart-safe queue
+    - [x] Guarded HTML fallback and production-ready Reddit runtime
+    - [x] Semantic ingredient mapping with safe canonical/alias learning
+    - [x] Live backfill and terminal unparseable-row audit
+      *Exit verified live: 425 recipes → 235 active + 190 rejected + 0 pending;
+      4,456/4,617 ingredient rows mapped, 161 intentionally unparseable rows
+      retained with renderable raw text; newest enrichment queue job completed
+      successfully; total recorded LLM usage 1,364,931 input tokens + 568,637
+      output tokens at $0.311476.*
 - [ ] **Phase 3 — UI port.** Components, images, TanStack Query auto-refresh,
       "N new recipes" pill. Retire `meal-prep-planner.jsx`.
 - [ ] **Phase 4 — Auth.** Auth.js + Google, localStorage migration on first sign-in.
@@ -353,3 +385,41 @@ sources, and proved GypsyPlate's failed checkpoint remains null. Final checks:
 421 workspace tests pass, all typechecks pass, the production web build passes,
 Compose reports db/web healthy and worker running, `/api/health` reports Phase
 1 with 425 recipes, and `/ops` plus `/api/recipes` return HTTP 200.
+
+### 2026-07-27 — Phase 2 complete: live enrichment and semantic mapping exit
+Implemented the complete direct, stateless Phase 2 pipeline in `8202b4c` and
+the live-provider hardening in `3f6e67d`: strict OpenRouter JSON Schema calls,
+one independently budgeted repair, durable per-response accounting, an
+exclusive restart-safe enrichment queue, suitability/derived-field/blurb
+tasks, guarded HTML fallback, a production-wired but credential-disabled
+Reddit adapter, semantic ingredient mapping and the Phase 2 operations/API
+surface.
+
+The live recipe pass classified all 425 Phase 1 rows. Final state is 235
+`active`, 190 `rejected` and zero `pending`; every active row has a blurb and
+category, every rejected row has an audit reason, and source URLs remain
+unique. Public recipe queries default to active rows and do not expose raw
+source JSON/content hashes.
+
+The semantic pass mapped 4,456 of 4,617 ingredient rows, growing the vocabulary
+from 117 to 774 canonical ingredients and from 117 to 1,727 aliases. The 161
+remaining rows are compound quantities, alternatives or serving annotations
+that do not admit a safe normalized identity; every one retains non-empty
+`raw_text` and remains renderable. A final zero-token queue run inspected that
+entire remainder and completed successfully with
+`unparseableRows=remainingRows=161`.
+
+Live provider execution exposed and fixed issues that mocks could not: the
+required `max_tokens` spelling, reasoning-safe output headroom, malformed
+success envelopes, unsupported Unicode regexes in the wire schema, prompt-only
+canonical near-matches, redundant `new`/`existing` mistakes and SDK requests
+that exceeded the nominal timeout. A12 records the durable rules so they are
+not re-learned.
+
+Final recorded LLM usage across probes, interrupted audit runs, the recipe
+backfill and ingredient mapping is 1,364,931 input tokens, 568,637 output
+tokens and **$0.311476**. The $1 UTC-day hard guard was never approached.
+Verification after the terminal-status fix: **524 tests passing** (shared 45,
+db 20, worker 459), all workspace typechecks clean, production Next.js build
+passing, Compose db/web healthy with worker running, `/api/health` reporting
+Phase 2, and `/ops` plus `/api/recipes` returning HTTP 200.

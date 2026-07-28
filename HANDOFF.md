@@ -1,12 +1,10 @@
 # Session Handoff
 
-**Read this first, then `PROGRESS.md`, then `PLAN.md`.**
-Written 2026-07-26 at the end of session 1. Feed this to a new session to resume.
+**Read this first, then `PROGRESS.md`, then the relevant parts of `PLAN.md`.**
+Written 2026-07-27 after the verified Phase 2 live exit.
 
-`PLAN.md` is the original design doc and is deliberately left unedited.
-`PROGRESS.md` is the live checkpoint log — its **Amendments** section overrides
-PLAN.md wherever the two disagree, and its **Phase checklist** is the source of
-truth for what is done. This file is the orientation layer that neither covers.
+`PLAN.md` remains the original design. `PROGRESS.md` is the authoritative live
+record; its amendments override `PLAN.md` where they disagree.
 
 ---
 
@@ -14,152 +12,114 @@ truth for what is done. This file is the orientation layer that neither covers.
 
 | Phase | State |
 |---|---|
-| 0 — Scaffold | ✅ done, verified from clean, committed `f138173` |
-| 1 — Deterministic ingestion | ✅ done, clean live exit verified |
-| 2 — LLM enrichment | **resume here** |
-| 3–7 | not started |
+| 0 — Scaffold | ✅ complete |
+| 1 — Deterministic ingestion | ✅ complete |
+| 2 — LLM enrichment | ✅ complete |
+| 3 — UI port | **resume here** |
+| 4–7 | not started |
 
-Nine commits are on `main` through the Phase 1 completion checkpoint. No remote
-is configured.
+The main Phase 2 implementation is committed in `8202b4c`; live-provider
+hardening is committed in `3f6e67d`. The final terminal-status fix and this
+checkpoint are the next commit.
 
-**Phase 1 is complete.** A clean bootstrap inserted 425 real recipes with local
-image references, zero duplicate URLs and zero LLM involvement. Ingredient
-normalization, transactional persistence, image caching, source seeding,
-scanner library, pg-boss/cron, `scan_runs` telemetry and `/ops` are done.
+### Verified live database state
 
-Everything currently passes: `corepack pnpm typecheck` clean across 4 projects,
-`corepack pnpm test` → **421 passing** (shared 35, db 19, worker 367), and the
-production web build passes.
+- 425 recipes total: 235 `active`, 190 `rejected`, 0 `pending`.
+- Every active recipe has its blurb and category; every rejected recipe has an
+  audit reason.
+- 0 duplicate source URLs.
+- 4,617 ingredient rows: 4,456 mapped and 161 intentionally unmapped.
+- 774 canonical ingredients and 1,727 aliases.
+- All 161 unmapped rows retain non-empty `raw_text` and are renderable. They are
+  compound quantities, alternatives or annotations that cannot safely become a
+  single normalized ingredient.
+- The newest enrichment queue job completed successfully in 15 ms with zero
+  tokens: it inspected the entire 161-row remainder and reported
+  `unparseableRows=remainingRows=161`.
+- Recorded OpenRouter usage across all live probes/runs: 1,364,931 input
+  tokens, 568,637 output tokens and **$0.311476**.
 
----
+### Verification at this checkpoint
 
-## Source decisions resolved
-
-Peter resolved both on 2026-07-26:
-
-1. **Serious Eats is enabled.** Peter confirmed permission and noted that the
-   crawl/extraction path is deterministic; later LLM analysis is separate.
-2. **Classpop is dropped entirely.** It is absent from the canonical source
-   config, seed, capture tooling, coverage report and fixture corpus.
-
-## Credentials outstanding
-
-`PROGRESS.md` has the live table. Summary: **OpenRouter key** needed before
-Phase 2 can run against anything real (the code can be built and tested against
-mocks without it). **Reddit** credentials are blocked on a reCAPTCHA failure at
-reddit.com/prefs/apps — diagnosis and fixes are in `PROGRESS.md`; Reddit is one
-source adapter and blocks nothing. **Google OAuth** client and test user are
-configured with the exact redirect
-`http://localhost:3000/api/auth/callback/google`; the client ID/secret and
-`AUTH_SECRET` still need to be copied into `.env` before Phase 4.
+- `corepack pnpm test` — **524 passing** (shared 45, db 20, worker 459).
+- `corepack pnpm typecheck` — clean across all workspaces.
+- `DATABASE_URL=postgresql://recipes:recipes@localhost:5432/recipes corepack
+  pnpm --filter @recipes/web build` — passing.
+- Compose: db/web healthy and worker running.
+- `/api/health` reports Phase 2 with 425 recipes.
+- `/ops` and `/api/recipes?limit=1` return HTTP 200.
 
 ---
 
-## How Peter wants this run
+## Phase 2 rules that must be preserved
 
-- **Use synchronous subagents** for implementation work, to keep the main
-  context clean. He asked for this explicitly. Not agent teams unless there is a
-  real case for them. Give each agent a tight scope, tell it what *not* to
-  touch, and make it verify before reporting.
-- **Verify subagent claims independently.** Two of three agents so far reported
-  something worth double-checking, and one silently fixed a real bug in a
-  package it was told not to modify (correctly, as it turned out — see A4).
-  Re-run the tests and the actual exit criterion yourself.
-- **One commit (or several) per stage**, so he can checkpoint through the build.
-- **Keep `PROGRESS.md` current** — it is the durable record he asked for, and
-  explicitly not the assistant memory directory.
-- He describes himself as not confident with infra/auth setup. Give numbered,
-  literal, click-by-click instructions for anything he has to do himself, and
-  say which exact string goes where.
-
----
-
-## Environment facts that will trip you up
-
-- **`pnpm` is NOT on PATH.** Use `corepack pnpm <cmd>` everywhere. `corepack
-  enable pnpm` fails with EACCES on `/usr/local/bin`; it needs sudo and is not
-  worth it since Docker is the real dev loop. All root scripts already use
-  `corepack pnpm`.
-- **Workspace packages have no build step.** `packages/shared` and
-  `packages/db` export raw `.ts` via their `exports` field; `apps/web` handles
-  them with `transpilePackages`. Don't add a build pipeline.
-- **After any `package.json` change**, the compose anonymous `node_modules`
-  volumes are stale: `docker compose down -v && docker compose up --build`.
-- `@recipes/shared/env` is **server-only** and deliberately not in the barrel
-  export — keep it out of client bundles.
-- `docker compose up` may currently be running from session 1; `docker compose
-  ps` to check, `docker compose down` to stop.
-
-### Import specifiers
-
-```ts
-import { db, recipes, eq, desc } from '@recipes/db';        // opens a pool
-import { recipes } from '@recipes/db/schema';               // side-effect free
-import { AISLES, convert } from '@recipes/shared';          // pure, client-safe
-import { env, requireEnv } from '@recipes/shared/env';      // SERVER ONLY
-```
-
-### The scanner API Phase 1 part 2 wires up
-
-```ts
-createFetcher(opts?): PoliteFetcher
-fetcher.fetch(url, {etag?, lastModified?, crawlDelayMs?})
-  : Promise<FetchOk | FetchNotModified | FetchError>
-discoverSource(fetcher, {feedUrl?, baseUrl}, {since?, limit?, feedEtag?})
-  : Promise<DiscoverResult>
-extractRecipeFromHtml(html, pageUrl?): ExtractionResult  // {found, recipe, missing[], stats}
-toRecipeDraft(recipe, sourceUrl, {publishedAt?, title?}): RecipeDraft | null
-```
-
-`toRecipeDraft` returns `null` when there is no title or no ingredients, and
-deliberately omits `blurb` / `keeps` / `tags` / `category` — those are Phase 2's
-job and are *expected* to be null after Phase 1.
+- Enrichment uses direct, stateless strict `json_schema` OpenRouter calls. Do
+  not introduce an agent loop or the discarded `emit_recipe` workaround.
+- The provider requires `max_tokens`, not the alternative spelling assumed by
+  the original plan.
+- OpenRouter rejects JavaScript Unicode-property regexes such as `\p{L}` in the
+  submitted schema. Strip only unsupported provider-facing `pattern` keywords;
+  retain full local Zod validation.
+- A malformed 200 response without `choices` goes through the one bounded,
+  independently accounted repair path.
+- Ingredient mapping uses 20-name batches, exact input/canonical enums,
+  deterministic normalization for an existing canonical mislabeled `new`, and
+  a 180-second request deadline.
+- Every provider response, including malformed/repair responses, is accounted
+  durably before further work. The UTC-day budget guard remains serialized.
+- When all remaining ingredient rows have been inspected and are unparseable,
+  the scan is a successful terminal result, not a retryable partial. A loaded
+  window smaller than the full remainder must still return `partial`.
+- Raw content and source JSON remain server-side; public recipe APIs default to
+  active rows.
+- Reddit is production-wired but disabled because credentials are unavailable.
 
 ---
 
-## What the live probe taught us (don't re-learn this)
+## Credentials and source state
 
-Detail in `apps/worker/test/fixtures/COVERAGE.md`. The load-bearing bits:
-
-- **The sitemap fallback is not optional.** 2 of 8 sources have no usable RSS.
-- **~1/3 of feed items are round-up posts** with no recipe. Absence of a Recipe
-  node is a free zero-token filter — count it *separately* from Phase 2 gate
-  rejections in `scan_runs` or the telemetry becomes unreadable.
-- **Ratings are often missing** (9/21 pages; The Kitchn never publishes them).
-  The UI must treat rating as genuinely optional.
-- **`author` is often a bare `@id`** pointing at a sibling `Person` node.
-  Already handled, but note `raw_jsonld` alone cannot re-derive it later.
-- Fixtures are ~12 MB of real HTML, committed on purpose so CI never hits the
-  network. Don't "clean them up."
+- `OPENROUTER_API_KEY` is configured in `.env`. Never print or commit it.
+- Reddit credentials remain unavailable after the account/app setup block;
+  Reddit is disabled and does not block Phase 3.
+- Google OAuth client/test user exist, but the client ID, client secret and
+  `AUTH_SECRET` still need to be added to `.env` before Phase 4.
+- Serious Eats is approved and enabled.
+- Classpop is intentionally absent everywhere.
+- GypsyPlate returns HTTP 403 for both sitemap endpoints. Its ingestion run
+  deliberately remains `partial`, its checkpoint stays null, and normal scans
+  retry it.
 
 ---
 
-## Verified facts worth not re-deriving
+## Operational facts
 
-- `deepseek/deepseek-v4-flash` **exists on OpenRouter** at exactly PLAN.md's
-  assumed pricing ($0.14/M in, $0.28/M out, 1M context, 393K max output).
-  Checked live against `https://openrouter.ai/api/v1/models`.
-- It reports **`structured_outputs`** in `supported_parameters`, so
-  `response_format: {type:"json_schema", strict:true}` is enforced server-side.
-  This **resolves PLAN.md §2's "one wrinkle"** — Zod stays as the TS boundary,
-  but the repair-retry becomes a safety net, not the expected path, and the
-  `emit_recipe` tool-calling workaround in §2 should **not** be built (A2).
-- Cached input is $0.028/M — an 80% discount, not the 98% PLAN.md claimed.
-  Immaterial at this scale (~$3/mo → ~$3.50/mo).
-- Toolchain: Node 24.13, Docker 29.2, Compose v5.0.2.
+- `pnpm` is not on `PATH`; use `corepack pnpm`.
+- Host database URL:
+  `postgresql://recipes:recipes@localhost:5432/recipes`.
+- Database-backed tests require the Compose database.
+- After a `package.json` change, anonymous dependency volumes are stale.
+  Rebuild with `docker compose down -v && docker compose up --build -d` only
+  after confirming that deleting this project's database/image volumes is
+  intended.
+- `packages/shared` and `packages/db` export TypeScript directly; do not add a
+  package build step.
+- `@recipes/shared/env` is server-only and must never enter client bundles.
+- Preserve the committed real-source HTML fixtures; tests must not crawl the
+  internet.
 
 ---
 
-## Suggested first move next session
+## Exact next move
 
-Resume Phase 2 with the direct OpenRouter client, strict structured outputs and
-mocked tests. Build the suitability gate and derived-field path before doing a
-real backfill. No agent loop or `emit_recipe` tool workaround: A2 records that
-the selected model supports strict `json_schema` output. An OpenRouter key is
-needed only for the first live call; implementation and tests can proceed
-without it.
+Start **Phase 3 — UI port** from the existing `meal-prep-planner.jsx` reference:
 
-Operational note: GypsyPlate's sitemap endpoints returned HTTP 403 during the
-clean exit run. Its latest run is deliberately `partial`, its checkpoint remains
-null, and the daily/manual scan will retry it. Do not hand-edit it to success or
-advance `last_scanned_at`.
+1. Inventory the reference UI and the current `apps/web` routes/components.
+2. Port the product shell and recipe views in reviewable stages.
+3. Use the local cached-image API and existing active-only recipe endpoints.
+4. Add TanStack Query polling/refresh behavior and the “N new recipes” pill.
+5. Verify optional ratings, responsive behavior and operations navigation.
+6. Retire `meal-prep-planner.jsx` only after the port matches the Phase 3 exit
+   criteria in `PLAN.md`/`PROGRESS.md`.
+
+Do not rerun Phase 2 enrichment just to prove completion; the final live
+zero-token queue job and database audit already establish the exit.

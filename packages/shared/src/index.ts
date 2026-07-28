@@ -13,6 +13,7 @@ export * from './format';
 export * from './grocery';
 export * from './planner';
 export * from './ratings';
+export * from './personalization';
 export * from './schemas';
 export * from './ingredients';
 export * from './blog-sources';

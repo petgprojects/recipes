@@ -380,6 +380,49 @@ every active recipe in the database and demands they agree.
 `packages/shared/test/grocery.test.ts` remains the specification of what a
 correct list *is*; neither suite is sufficient alone.
 
+### A20 — Hard rules filter on recipe columns only; aspects feed the soft profile
+*Phase 7.*
+
+PLAN.md §5 lists the deterministic rules as "`median(rating) WHERE
+total_minutes > 60` … Same for cost aspects, cleanup aspects, categories." The
+time, category and tag rules are implemented as written. The cost and cleanup
+ones are not, and cannot be, in the form the sentence implies.
+
+An aspect is a property of **a cook**, recorded on `cook_logs.aspects` by the
+person who cooked it. `recipes` has no corresponding column and could not have
+one: the database cannot answer "is this recipe expensive?" or "does this
+recipe make a mess?" about a recipe nobody has cooked yet. A hard rule is a
+`WHERE` clause over the browse feed, which is mostly recipes with no cook logs
+at all, so there is nothing for an aspect-derived rule to test against. Writing
+one anyway would produce a filter that silently matches nothing.
+
+The signal is real and it is not discarded — `expensive`, `too_much_cleanup`
+and the rest are exactly what step 2 feeds to the model, which is the part of
+the loop allowed to reason from a pattern instead of filtering on a column.
+That is also the honest division of labour between the two halves: the SQL half
+gets the things a column can prove, the prose half gets the things it cannot.
+
+Three further decisions inside the deterministic half, all of them erring the
+same direction as A18 — a missed filter beats a wrong one, because a filter
+that hides too much hides it invisibly:
+
+1. **Median, not mean.** One furious 1★ among nine 4★ moves a mean enough to
+   trip a threshold and does not move a median at all.
+2. **The time ladder emits its loosest triggering threshold.** The buckets are
+   nested — everything over 90 minutes is also over 30 — so a reader who loves
+   40-minute dinners and loathes 3-hour braises drags the ">30" median down
+   with the braises alone. Emitting `max_minutes: 30` off that evidence would
+   hide the very recipes they rated 5★.
+3. **A rule the reader switched off stays off**, and is kept in the column even
+   after its evidence evaporates. Re-deriving it as enabled would make the
+   switch not work; dropping it would silently re-arm the filter the moment the
+   pattern came back. `mergeHardRules()` refreshes the evidence on a disabled
+   rule but never its `enabled` flag.
+
+`user_preferences.hard_rules` is a `jsonb` column, so it is *parsed*, not cast,
+on the way out (`parseHardRules()`): an older deploy's shape or a hand edit in
+psql should cost that one rule its filter, not take the browse feed down.
+
 ### A3 — Source list resolved (PLAN.md §8, open question 11)
 Budget Bytes, Pinch of Yum, Downshiftology, GypsyPlate, Skinnytaste, The
 Kitchn, Love & Lemons, Serious Eats.

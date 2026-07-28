@@ -13,6 +13,7 @@
     "./grocery": "./src/grocery.ts",
     "./planner": "./src/planner.ts",
     "./ratings": "./src/ratings.ts",
+    "./personalization": "./src/personalization.ts",
     "./schemas": "./src/schemas.ts",
     "./ingredients": "./src/ingredients.ts",
     "./scan-jobs": "./src/scan-jobs.ts",

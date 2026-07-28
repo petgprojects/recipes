@@ -1,42 +1,45 @@
 /**
- * GET /api/recipes
+ * GET /api/recipes — the browse feed.
  *
- * **This returns `[]` today and that is the correct Phase 0 result.** PLAN.md §4:
- * "Every recipe in the system arrives from a crawl ... there is no seed data to
- * special-case." Phase 1 fills the table; nothing is faked here to make the
- * endpoint look populated.
+ * Query parameters:
  *
- * Query parameters — both exist now because Phase 3 polls this endpoint
- * (PLAN.md §5: "TanStack Query with `refetchInterval` (~5 min) against
- * `GET /api/recipes?since=<ts>`"), and a poll parameter added after the client
- * ships is a client that has to be redeployed:
+ *   ?limit=<1..500>         page size, default 50. The planner asks for the
+ *                           full active set and filters categories client-side,
+ *                           exactly as the artifact did.
+ *   ?status=<...|all>       defaults to `active`. Pending rows are unfinished
+ *                           Phase 2 work; rejected rows stay auditable without
+ *                           entering the feed.
+ *   ?since=<ISO timestamp>  rows whose `last_seen_at` is strictly newer.
  *
- *   ?since=<ISO timestamp>  rows whose `last_seen_at` is strictly newer. That
- *                           column, not `first_seen_at`, because a re-crawl that
- *                           finds an upstream edit bumps `last_seen_at` and the
- *                           poller should see the change.
- *   ?limit=<1..200>         page size, default 50.
- *   ?status=<...|all>       defaults to `active`. Pending rows are durable
- *                           Phase 2 work, not browse-ready recipes; rejected
- *                           rows stay auditable without entering the feed.
+ * **`since` is not what the "N new recipes" pill uses**, and it is worth being
+ * explicit about why (PROGRESS.md amendment A13). `last_seen_at` is bumped for
+ * every recipe a re-crawl re-observes, so a poll anchored to it reports the
+ * whole corpus as new the moment a scan finishes; and Phase 2 publishes a
+ * pending row as `active` without touching the column, so a genuinely new
+ * recipe can arrive with a timestamp *behind* the client's watermark. The
+ * client therefore diffs recipe ids, which is correct under both. The
+ * parameter stays because "what changed since X" is still the right question
+ * for any other consumer.
  *
- * The response deliberately omits `raw_jsonld`, HTTP validators and the
- * content hash. Those are internal crawl/re-enrichment inputs and can contain
- * source prose; browse clients receive our fields and attribution only.
+ * The response omits `raw_jsonld`, the content hash, the HTTP validators and
+ * the instruction steps — see `lib/recipes.ts`.
  *
  * A bad parameter is a 400 with a reason rather than a silently ignored filter.
  */
 
 import { NextResponse } from 'next/server';
-import { and, db, desc, eq, gt, recipes } from '@recipes/db';
-import { RECIPE_STATUS, type RecipeStatus } from '@recipes/shared';
+import { RECIPE_STATUS } from '@recipes/shared';
+import {
+  DEFAULT_RECIPE_LIMIT,
+  MAX_RECIPE_LIMIT,
+  isRecipeStatus,
+  listRecipes,
+  type ListRecipesOptions,
+} from '@/lib/recipes';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
-
-const DEFAULT_LIMIT = 50;
-const MAX_LIMIT = 200;
 
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
@@ -44,37 +47,38 @@ function badRequest(message: string) {
 
 export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
+  const options: ListRecipesOptions = {};
 
   // ── since ────────────────────────────────────────────────────────────────
   const sinceRaw = params.get('since');
-  let since: Date | undefined;
   if (sinceRaw !== null && sinceRaw !== '') {
     const parsed = new Date(sinceRaw);
     if (Number.isNaN(parsed.getTime())) {
       return badRequest(`Invalid \`since\`: ${sinceRaw}. Expected an ISO 8601 timestamp.`);
     }
-    since = parsed;
+    options.since = parsed;
   }
 
   // ── limit ────────────────────────────────────────────────────────────────
   const limitRaw = params.get('limit');
-  let limit = DEFAULT_LIMIT;
+  options.limit = DEFAULT_RECIPE_LIMIT;
   if (limitRaw !== null && limitRaw !== '') {
     const parsed = Number(limitRaw);
-    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_LIMIT) {
-      return badRequest(`Invalid \`limit\`: ${limitRaw}. Expected an integer between 1 and ${MAX_LIMIT}.`);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_RECIPE_LIMIT) {
+      return badRequest(
+        `Invalid \`limit\`: ${limitRaw}. Expected an integer between 1 and ${MAX_RECIPE_LIMIT}.`,
+      );
     }
-    limit = parsed;
+    options.limit = parsed;
   }
 
   // ── status ───────────────────────────────────────────────────────────────
   const statusRaw = params.get('status');
-  let statusFilter: ReturnType<typeof eq> | undefined = eq(recipes.status, 'active');
   if (statusRaw !== null && statusRaw !== '') {
     if (statusRaw === 'all') {
-      statusFilter = undefined;
-    } else if ((RECIPE_STATUS as readonly string[]).includes(statusRaw)) {
-      statusFilter = eq(recipes.status, statusRaw as RecipeStatus);
+      options.status = null;
+    } else if (isRecipeStatus(statusRaw)) {
+      options.status = statusRaw;
     } else {
       return badRequest(
         `Invalid \`status\`: ${statusRaw}. Expected one of ${RECIPE_STATUS.join(', ')} or "all".`,
@@ -83,46 +87,13 @@ export async function GET(request: Request) {
   }
 
   try {
-    const rows = await db
-      .select({
-        id: recipes.id,
-        sourceId: recipes.sourceId,
-        sourceUrl: recipes.sourceUrl,
-        title: recipes.title,
-        slug: recipes.slug,
-        blurb: recipes.blurb,
-        totalMinutes: recipes.totalMinutes,
-        activeMinutes: recipes.activeMinutes,
-        servings: recipes.servings,
-        keepsDays: recipes.keepsDays,
-        freezerMonths: recipes.freezerMonths,
-        category: recipes.category,
-        tags: recipes.tags,
-        imageUrl: recipes.imageUrl,
-        imageLocalPath: recipes.imageLocalPath,
-        imageW: recipes.imageW,
-        imageH: recipes.imageH,
-        imageBlurhash: recipes.imageBlurhash,
-        author: recipes.author,
-        sourceRating: recipes.sourceRating,
-        sourceRatingCount: recipes.sourceRatingCount,
-        instructions: recipes.instructions,
-        status: recipes.status,
-        rejectionReason: recipes.rejectionReason,
-        publishedAt: recipes.publishedAt,
-        firstSeenAt: recipes.firstSeenAt,
-        lastSeenAt: recipes.lastSeenAt,
-      })
-      .from(recipes)
-      .where(and(statusFilter, since ? gt(recipes.lastSeenAt, since) : undefined))
-      .orderBy(desc(recipes.lastSeenAt))
-      .limit(limit);
-
+    const rows = await listRecipes(options);
     return NextResponse.json(rows, { headers: { 'cache-control': 'no-store' } });
   } catch (error: unknown) {
     // Same reasoning as /api/health: do not answer 200 with an empty array when
     // the database is unreachable — "no recipes" and "no database" are very
-    // different answers and Phase 3's poller must be able to tell them apart.
+    // different answers and the planner's poller must be able to tell them
+    // apart.
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },
       { status: 503, headers: { 'cache-control': 'no-store' } },

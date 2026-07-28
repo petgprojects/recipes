@@ -153,6 +153,49 @@ row has been inspected and is unparseable, that is a successful terminal
 backfill condition rather than a retryable partial. The live exit retains 161
 such compound/alternative lines intentionally.
 
+### A13 — The "N new recipes" pill diffs ids, not `?since=`
+*Phase 3. Reason: `last_seen_at` answers a different question than the pill asks.*
+
+PLAN.md §5 specifies polling `GET /api/recipes?since=<ts>` and surfacing the
+result as a pill. The parameter exists and works, but anchoring the pill to it
+would be wrong in both directions:
+
+- **False positives.** `storage/recipes.ts` bumps `last_seen_at` on every
+  recipe a re-crawl re-observes, unchanged or not. The morning after a scan the
+  pill would announce all 235 recipes as new.
+- **False negatives.** Phase 2 publishes a `pending` row as `active` without
+  touching `last_seen_at` (amendment A8), so a genuinely new recipe can become
+  browsable with a timestamp already behind the client's watermark and never
+  appear.
+
+The planner therefore polls the browse list and counts **recipe ids it has
+never rendered**. That is correct under both behaviours, needs no new column,
+and keeps the reader's list stable until they ask for the new rows — which was
+the actual point of the pill. `?since=` remains supported and documented for
+any consumer asking "what changed since X".
+
+### A14 — Three deliberate deviations in the UI port
+*Phase 3.*
+
+1. **The artifact's CSS is no longer byte-identical.** Its reset,
+   `.mp button { … border: none; background: none }`, scores (0,1,1) and so beat
+   every single-class rule in the same file: `.mp-btn`'s outline, `.mp-btn-fill`'s
+   green, `.mp-tab`'s pill and `.mp-mini`'s background all lost to it, and the
+   artifact rendered its buttons as flat text. The selector is now
+   `:where(.mp) button`, which contributes no specificity and restores the
+   design the rest of the file describes. Everything else above the Phase 3
+   marker in `artifact.css` is unchanged.
+2. **`next/image` runs `unoptimized`.** The worker already fetches each photo
+   once, auto-orients it, fits it inside 800×800 and writes one WebP frame, so
+   the optimizer would re-encode an already-optimal file — and would require
+   `sharp` in the web image, which nothing else there needs. Lazy loading,
+   intrinsic sizing and the reserved aspect box still come from `next/image`.
+3. **No blurhash placeholder.** `recipes.image_blurhash` is populated for zero
+   of 425 rows — Phase 1 never computed one. Rather than add an encode
+   dependency to the worker and a decode dependency to the browser for a
+   local-network app, cards reserve the 16:9 box in `--blush` and fill it when
+   the image lands. The column stays for whenever that changes.
+
 ### A3 — Source list resolved (PLAN.md §8, open question 11)
 Budget Bytes, Pinch of Yum, Downshiftology, GypsyPlate, Skinnytaste, The
 Kitchn, Love & Lemons, Serious Eats.
@@ -232,8 +275,18 @@ removes it structurally.
       retained with renderable raw text; newest enrichment queue job completed
       successfully; total recorded LLM usage 1,364,931 input tokens + 568,637
       output tokens at $0.311476.*
-- [ ] **Phase 3 — UI port.** Components, images, TanStack Query auto-refresh,
-      "N new recipes" pill. Retire `meal-prep-planner.jsx`.
+- [x] **Phase 3 — UI port.** ✅ **COMPLETE.**
+    - [x] Shared display formatting + grocery aggregation (`@recipes/shared`)
+    - [x] Browse/detail queries, `/api/recipes/:id`, cached-image route
+    - [x] `RecipeCard`, `RecipeSheet`, `PicksList`, `GroceryReceipt`, planner shell
+    - [x] Photos with a deliberate text-only fallback; optional ratings
+    - [x] TanStack Query polling + focus refetch + "N new recipes" pill (A13)
+    - [x] `localStorage` picks and check-offs, shaped like the Phase 4 tables
+    - [x] `meal-prep-planner.jsx` retired
+      *Exit verified live: 235 active recipes rendered from Postgres with local
+      photos, picks → grocery receipt → check-off round-trip persisting across a
+      reload, the pill counting exactly one probe row and clearing on click, no
+      horizontal overflow at 390px or 1280px, and no page or console errors.*
 - [ ] **Phase 4 — Auth.** Auth.js + Google, localStorage migration on first sign-in.
 - [ ] **Phase 5 — Grocery list server-side.** SQL aggregation, per-user checks,
       print + copy-to-clipboard.
@@ -423,3 +476,48 @@ Verification after the terminal-status fix: **524 tests passing** (shared 45,
 db 20, worker 459), all workspace typechecks clean, production Next.js build
 passing, Compose db/web healthy with worker running, `/api/health` reporting
 Phase 2, and `/ops` plus `/api/recipes` returning HTTP 200.
+
+### 2026-07-27 — Phase 3 complete: the artifact, live
+The planner now runs on real crawled data. `meal-prep-planner.jsx` is deleted;
+its two lasting contributions — the ingredient seed and the CSS — were carried
+forward in Phase 0 and this phase respectively.
+
+**Where the logic went.** Display formatting (`fmtQty`/`fmtLine`/`fmtTime`, plus
+`fmtKeeps` and `fmtRating` for the two nullable-column cases the artifact never
+had) and the grocery aggregation live in `packages/shared`, not in a React
+`useMemo`. That is where they can be tested — 27 new tests — and it is the seam
+Phase 5 replaces with SQL without touching a component. The merge key is
+already `grocery_checks.item_key`: canonical ingredient identity plus unit
+*dimension*, so "1 lb chicken breast" and "8 oz boneless skinless chicken
+breasts" become one line with one checkbox while `2 cans` and `14 oz` stay two,
+and an unmapped row keys on its own slugified text rather than colliding.
+
+**What real data forced.** Aggregation prints the largest unit that keeps the
+total at or above 1 (`2 tbsp + 1 cup` reads `1⅛ cup`, not `18 tbsp`); a line
+with no parseable quantity folds into that ingredient's real line and marks the
+total `+` instead of inventing a number or vanishing; the detail sheet prints a
+mapped row as parsed amount + canonical name but an unmapped row as its whole
+raw line, since the raw text already carries the quantity. Cards omit time,
+servings, shelf life and rating individually when the source never published
+them.
+
+**Serving and polling.** `/api/images/:file` hands out the worker's cached WebP
+behind an exact `sha256.webp` shape check, so no path outside the volume is
+expressible; `/api/recipes/:id` carries steps and ingredient lines, which the
+235-row browse feed deliberately does not. The browse page is server-rendered
+from the same `listRecipes()` the API uses — identical JSON shape, so it can be
+handed straight to TanStack Query as `initialData` — then polled every five
+minutes and on window focus. Amendments A13 and A14 record the pill's id-diff,
+the CSS specificity fix, `unoptimized` images and the absent blurhash.
+
+**Verification.** 551 tests passing (shared 72, db 20, worker 459) with the
+Compose database up, all four typechecks clean, production build clean, and no
+server-only symbol reachable from the client bundle. Driven live in headless
+Chrome: 235 cards with local photos, three saved picks producing a 29-line
+receipt across eight aisles, a check-off surviving a reload, the batch
+multiplier scaling servings, the detail sheet loading 16 ingredients and 4 steps
+with its outbound attribution link and closing on Escape, an inserted probe row
+raising exactly "1 new recipe — show it" and clearing on click (row removed
+afterwards; the database is back to 425), every cached image blocked degrading
+to the text-only card with zero broken frames, and no horizontal overflow at
+390px or 1280px. `/ops` and its link back to the planner still work.

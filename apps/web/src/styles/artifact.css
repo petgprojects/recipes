@@ -22,7 +22,13 @@
   -webkit-font-smoothing: antialiased;
 }
 .mp *, .mp *::before, .mp *::after { box-sizing: border-box; }
-.mp button { font: inherit; color: inherit; cursor: pointer; border: none; background: none; }
+/* `:where(.mp)`, not `.mp` — the one intentional change to the artifact's CSS.
+   `.mp button` scores (0,1,1) and therefore beat every single-class rule below
+   it: `.mp-btn`'s border, `.mp-btn-fill`'s green, `.mp-tab`'s pill outline and
+   `.mp-mini`'s background all lost to this reset, so the artifact rendered its
+   buttons as flat text. `:where()` contributes no specificity, which restores
+   the design the rest of this file describes. */
+:where(.mp) button { font: inherit; color: inherit; cursor: pointer; border: none; background: none; }
 .mp :focus-visible { outline: 2.5px solid var(--leaf); outline-offset: 2px; border-radius: 3px; }
 
 .mp-wrap { max-width: 760px; margin: 0 auto; padding: 0 18px 120px; }
@@ -32,6 +38,10 @@
 .mp-eyebrow {
   font-family: var(--mono); font-size: 11px; letter-spacing: .16em;
   text-transform: uppercase; color: var(--beet-soft);
+  /* Phase 3: the eyebrow carries the ops link on its right. Flex rather than a
+     float so the two wrap onto separate lines on a phone instead of overlapping. */
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 10px; flex-wrap: wrap;
 }
 .mp-title {
   font-family: var(--display); font-weight: 800;
@@ -254,10 +264,62 @@
 }
 .mp-note { font-size: 12.5px; line-height: 1.5; color: var(--beet-soft); margin: 16px 2px 0; }
 
+/* ---------------------------------------------------------------- *
+ *  Phase 3 additions. Everything above this line is the artifact's
+ *  own CSS, unchanged. Everything below exists because live data
+ *  brought things the 24 hand-authored recipes did not have:
+ *  photographs, optional ratings, ingredient notes, an outbound link
+ *  per recipe, and recipes that arrive while you are reading.
+ * ---------------------------------------------------------------- */
+
+/* ---- photos ---- */
+/* The aspect box is reserved before the image loads, so a card never
+   reflows under a reader mid-scroll. `--blush` rather than a spinner:
+   the photo is decoration, and a placeholder that pulses is worse than
+   one that waits. */
+.mp-photo {
+  margin: -16px -16px 14px; border-radius: 13px 13px 0 0; overflow: hidden;
+  background: var(--blush); aspect-ratio: 16 / 9;
+}
+.mp-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.mp-hero {
+  margin: 4px -20px 4px; overflow: hidden; background: var(--blush);
+  aspect-ratio: 16 / 9;
+}
+.mp-hero img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* ---- optional metadata ---- */
+.mp-card-rating { color: var(--amber); font-weight: 700; }
+.mp-ing-note { color: var(--beet-soft); font-size: 13px; }
+.mp-step-name { font-family: var(--mono); font-size: 12px; color: var(--beet); }
+.mp-link { color: var(--leaf); font-weight: 700; text-decoration: underline; }
+.mp-ops-link {
+  color: var(--beet-soft); text-decoration: none;
+  border-bottom: 1.5px solid var(--line);
+}
+.mp-ops-link:hover { color: var(--beet); border-color: var(--beet); }
+
+/* ---- "N new recipes" ---- */
+/* A button, not a toast: nothing moves until the reader asks for it
+   (PLAN.md §5). Sticky under the tab bar so it survives a long scroll. */
+.mp-pill {
+  position: sticky; top: 58px; z-index: 25;
+  display: block; width: 100%; margin: 0 0 12px;
+  padding: 11px 16px; border-radius: 999px;
+  background: var(--amber); color: #2A1119;
+  font-family: var(--mono); font-size: 12px; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; text-align: center;
+  box-shadow: 0 2px 0 rgba(88,32,60,.14);
+  animation: mp-fade .2s ease-out;
+}
+.mp-pill:hover { background: #B87C12; }
+
 @media (min-width: 640px) {
   .mp-grid { grid-template-columns: 1fr 1fr; }
   .mp-scrim { align-items: center; }
   .mp-sheet { border-radius: 18px; max-height: 86vh; }
+  .mp-hero { margin: 4px -20px 6px; border-radius: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .mp *, .mp *::before { animation: none !important; transition: none !important; }

@@ -1,12 +1,13 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import { Providers } from './providers';
 import './globals.css';
 
 /**
- * Deliberately bare. PLAN.md §5 Phase 3 ports `meal-prep-planner.jsx` and its
- * CSS (already sitting in `src/styles/artifact.css`) — that is the design
- * system, and there is no Tailwind or component library in this project. Adding
- * global styling here would only have to be deleted then.
+ * Deliberately bare. The design system is `src/styles/artifact.css`, ported
+ * from `meal-prep-planner.jsx`; there is no Tailwind or component library in
+ * this project. The only thing the root layout adds is the query client, which
+ * has to wrap every route that polls.
  */
 
 export const metadata: Metadata = {
@@ -17,7 +18,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }

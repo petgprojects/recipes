@@ -1,7 +1,7 @@
 # Session Handoff
 
 **Read this first, then `PROGRESS.md`, then the relevant parts of `PLAN.md`.**
-Written 2026-07-27 after the verified Phase 2 live exit.
+Written 2026-07-27 after the verified Phase 3 exit.
 
 `PLAN.md` remains the original design. `PROGRESS.md` is the authoritative live
 record; its amendments override `PLAN.md` where they disagree.
@@ -15,111 +15,138 @@ record; its amendments override `PLAN.md` where they disagree.
 | 0 — Scaffold | ✅ complete |
 | 1 — Deterministic ingestion | ✅ complete |
 | 2 — LLM enrichment | ✅ complete |
-| 3 — UI port | **resume here** |
-| 4–7 | not started |
+| 3 — UI port | ✅ complete |
+| 4 — Auth | **resume here** |
+| 5–7 | not started |
 
-The main Phase 2 implementation is committed in `8202b4c`; live-provider
-hardening is committed in `3f6e67d`. The final terminal-status fix and this
-checkpoint are the next commit.
+Phase 2 is committed in `8202b4c`, `3f6e67d` and `5c90c5a`. Phase 3 is the next
+commit; `meal-prep-planner.jsx` is deleted in it and lives on in git history.
 
-### Verified live database state
+### Verified live state
 
-- 425 recipes total: 235 `active`, 190 `rejected`, 0 `pending`.
-- Every active recipe has its blurb and category; every rejected recipe has an
-  audit reason.
-- 0 duplicate source URLs.
-- 4,617 ingredient rows: 4,456 mapped and 161 intentionally unmapped.
-- 774 canonical ingredients and 1,727 aliases.
-- All 161 unmapped rows retain non-empty `raw_text` and are renderable. They are
-  compound quantities, alternatives or annotations that cannot safely become a
-  single normalized ingredient.
-- The newest enrichment queue job completed successfully in 15 ms with zero
-  tokens: it inspected the entire 161-row remainder and reported
-  `unparseableRows=remainingRows=161`.
-- Recorded OpenRouter usage across all live probes/runs: 1,364,931 input
-  tokens, 568,637 output tokens and **$0.311476**.
+- 425 recipes: 235 `active`, 190 `rejected`, 0 `pending`; 0 duplicate URLs.
+- 4,617 ingredient rows, 4,456 mapped, 161 intentionally unmapped and still
+  renderable from `raw_text`.
+- 774 canonical ingredients, 1,727 aliases.
+- Recorded OpenRouter usage to date: 1,364,931 input tokens, 568,637 output
+  tokens, **$0.311476**. Phase 3 spent nothing — the UI makes no LLM calls.
 
 ### Verification at this checkpoint
 
-- `corepack pnpm test` — **524 passing** (shared 45, db 20, worker 459).
-- `corepack pnpm typecheck` — clean across all workspaces.
 - `DATABASE_URL=postgresql://recipes:recipes@localhost:5432/recipes corepack
-  pnpm --filter @recipes/web build` — passing.
-- Compose: db/web healthy and worker running.
-- `/api/health` reports Phase 2 with 425 recipes.
-- `/ops` and `/api/recipes?limit=1` return HTTP 200.
+  pnpm test` — **551 passing** (shared 72, db 20, worker 459). Without
+  `DATABASE_URL` in the environment, four database-backed worker suites fail to
+  load; that is the documented requirement, not a regression.
+- `corepack pnpm typecheck` — clean across all four workspaces.
+- `DATABASE_URL=… corepack pnpm --filter @recipes/web build` — passing.
+- Compose db/web healthy, worker running; `/api/health` 200, `/ops` 200,
+  `/api/recipes` 200, `/api/recipes/:id` 200, `/api/images/:file` 200.
+- Driven live in headless Chrome (see the Phase 3 log entry in `PROGRESS.md`
+  for the full list): picks → receipt → check-off persistence, the pill, the
+  detail sheet, the no-photo fallback, 390px and 1280px widths.
 
 ---
 
+## Phase 3 rules that must be preserved
+
+- **The pill counts unseen recipe ids, not `?since=` rows** (amendment A13).
+  `last_seen_at` moves on every re-crawl and does not move when Phase 2
+  activates a pending row, so a timestamp watermark is wrong in both
+  directions. Do not "simplify" this back to `?since=`.
+- Display formatting and grocery aggregation live in `@recipes/shared`
+  (`format.ts`, `grocery.ts`) and are tested there. Phase 5 replaces the
+  aggregation's internals with SQL over
+  `saved_recipes × recipe_ingredients × ingredients`; the item key it produces
+  is already `grocery_checks.item_key`, so the check-offs migrate as they are.
+- Merge grocery lines within a unit dimension only. `2 cans` and `14 oz` are two
+  lines; an unmapped row keys on its slugified raw text.
+- The browse feed carries no instruction steps or ingredient lines — those are
+  `/api/recipes/:id` — and no `raw_jsonld`, content hash or HTTP validators.
+- `/api/images/:file` accepts only `^[0-9a-f]{64}\.webp$`; that shape check is
+  the path-traversal defence.
+- The server-rendered page and `GET /api/recipes` must keep returning the same
+  JSON shape from the same `listRecipes()`; that is what makes `initialData`
+  safe.
+- `next/image` runs `unoptimized` and `image_blurhash` is unpopulated (A14).
+- Cards with no usable photo fall back to the text-only layout — verified with
+  every image request blocked.
+
 ## Phase 2 rules that must be preserved
 
-- Enrichment uses direct, stateless strict `json_schema` OpenRouter calls. Do
-  not introduce an agent loop or the discarded `emit_recipe` workaround.
-- The provider requires `max_tokens`, not the alternative spelling assumed by
-  the original plan.
-- OpenRouter rejects JavaScript Unicode-property regexes such as `\p{L}` in the
-  submitted schema. Strip only unsupported provider-facing `pattern` keywords;
-  retain full local Zod validation.
-- A malformed 200 response without `choices` goes through the one bounded,
-  independently accounted repair path.
-- Ingredient mapping uses 20-name batches, exact input/canonical enums,
-  deterministic normalization for an existing canonical mislabeled `new`, and
-  a 180-second request deadline.
-- Every provider response, including malformed/repair responses, is accounted
-  durably before further work. The UTC-day budget guard remains serialized.
-- When all remaining ingredient rows have been inspected and are unparseable,
-  the scan is a successful terminal result, not a retryable partial. A loaded
-  window smaller than the full remainder must still return `partial`.
-- Raw content and source JSON remain server-side; public recipe APIs default to
+- Enrichment uses direct, stateless strict `json_schema` OpenRouter calls. No
+  agent loop, no `emit_recipe` workaround.
+- The provider requires `max_tokens`; strip only unsupported provider-facing
+  `pattern` keywords (`\p{L}`) while keeping full local Zod validation.
+- A malformed 200 without `choices` goes through the one bounded, independently
+  accounted repair path.
+- Ingredient mapping: 20-name batches, exact enums, deterministic normalization
+  for an existing canonical mislabeled `new`, 180-second deadline.
+- Every provider response is accounted durably before further work; the UTC-day
+  budget guard stays serialized.
+- An inspected remainder of unparseable ingredient rows is a successful
+  terminal result, not a retryable partial.
+- Raw content and source JSON stay server-side; public recipe APIs default to
   active rows.
-- Reddit is production-wired but disabled because credentials are unavailable.
 
 ---
 
 ## Credentials and source state
 
 - `OPENROUTER_API_KEY` is configured in `.env`. Never print or commit it.
-- Reddit credentials remain unavailable after the account/app setup block;
-  Reddit is disabled and does not block Phase 3.
-- Google OAuth client/test user exist, but the client ID, client secret and
-  `AUTH_SECRET` still need to be added to `.env` before Phase 4.
-- Serious Eats is approved and enabled.
-- Classpop is intentionally absent everywhere.
-- GypsyPlate returns HTTP 403 for both sitemap endpoints. Its ingestion run
-  deliberately remains `partial`, its checkpoint stays null, and normal scans
-  retry it.
+- **Phase 4 needs `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `AUTH_SECRET`
+  placed in `.env`.** The OAuth client and test user already exist, with the
+  callback `http://localhost:3000/api/auth/callback/google`. This is the one
+  thing blocking the next phase from starting cleanly.
+- Reddit credentials remain unavailable; the Reddit adapter is production-wired
+  and `enabled=false`.
+- Serious Eats is approved and enabled; Classpop is intentionally absent.
+- GypsyPlate returns HTTP 403 for both sitemap endpoints. Its run stays
+  `partial`, its checkpoint null, and normal scans retry it.
 
 ---
 
 ## Operational facts
 
 - `pnpm` is not on `PATH`; use `corepack pnpm`.
-- Host database URL:
-  `postgresql://recipes:recipes@localhost:5432/recipes`.
-- Database-backed tests require the Compose database.
-- After a `package.json` change, anonymous dependency volumes are stale.
-  Rebuild with `docker compose down -v && docker compose up --build -d` only
-  after confirming that deleting this project's database/image volumes is
-  intended.
-- `packages/shared` and `packages/db` export TypeScript directly; do not add a
-  package build step.
-- `@recipes/shared/env` is server-only and must never enter client bundles.
-- Preserve the committed real-source HTML fixtures; tests must not crawl the
-  internet.
+- Host database URL: `postgresql://recipes:recipes@localhost:5432/recipes`.
+- Database-backed tests need the Compose database *and* `DATABASE_URL` exported.
+- **After a `package.json` change, do not reach for `docker compose down -v`** —
+  it deletes `pgdata` and with it 425 crawled, enriched recipes. Refresh only
+  the stale anonymous dependency volumes:
+  `docker compose build && docker compose rm -svf web worker migrate &&
+  docker compose up -d`. `rm -sv` removes anonymous volumes only; named volumes
+  survive. This is how `@tanstack/react-query` was added in Phase 3.
+- `packages/shared` and `packages/db` export TypeScript directly; no build step.
+- `@recipes/shared/env` is server-only. The image route imports it; nothing in
+  `src/components` may. Client-facing types live in `src/lib/recipe-types.ts`
+  precisely so a component never has to import from a module that opens a pool.
+- Preserve the committed real-source HTML fixtures; tests must not crawl.
 
 ---
 
 ## Exact next move
 
-Start **Phase 3 — UI port** from the existing `meal-prep-planner.jsx` reference:
+Start **Phase 4 — Auth** (`PLAN.md` §5):
 
-1. Inventory the reference UI and the current `apps/web` routes/components.
-2. Port the product shell and recipe views in reviewable stages.
-3. Use the local cached-image API and existing active-only recipe endpoints.
-4. Add TanStack Query polling/refresh behavior and the “N new recipes” pill.
-5. Verify optional ratings, responsive behavior and operations navigation.
-6. Retire `meal-prep-planner.jsx` only after the port matches the Phase 3 exit
-   criteria in `PLAN.md`/`PROGRESS.md`.
+1. Get `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `AUTH_SECRET` into `.env`.
+2. Wire Auth.js with the Drizzle adapter — `users`, `accounts`, `sessions` and
+   `verification_tokens` already match its expected shape, so no migration.
+3. Implement `getCurrentUser()` with the `dev@local` fallback described in
+   `PLAN.md` §4 (development only; production means no user without a session).
+4. Move picks and check-offs from `localStorage` into `saved_recipes` and
+   `grocery_checks`. The client shapes are already `{recipeId: batches}` and
+   `{itemKey: true}` under `mealprep:v2:saved` / `mealprep:v2:checked`, so the
+   one-time migration on first sign-in is a direct insert.
+5. Keep the planner working signed-out; auth adds persistence, it does not
+   become a gate.
 
-Do not rerun Phase 2 enrichment just to prove completion; the final live
-zero-token queue job and database audit already establish the exit.
+Known issue worth a look at some point, not a Phase 3 defect: spot-checking
+ingredient rows turned up a bad Phase 2 semantic mapping —
+`1 large bunch flat-leaf parsley (about 2 ounces; 57 g)…` mapped to canonical
+`mushrooms`. The row renders correctly from `raw_text`, but a wrong canonical
+merges wrongly on the grocery list. A crude probe (canonical name's first token
+absent from the raw line) flags 390 of the 4,456 mapped rows, and most of those
+are legitimate synonyms — `fresh herbs` for a parsley/dill/chives line,
+`scallions` for `green onions` — so the real error rate is unknown and needs a
+proper sampled audit. Worth scheduling before Phase 5 puts those joins under a
+SQL grocery aggregation.

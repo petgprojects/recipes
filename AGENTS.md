@@ -13,13 +13,17 @@ Do not restart completed phases or re-research facts already recorded there.
 
 ## Current checkpoint
 
-- Phase 0, Phase 1 and Phase 2 are complete.
-- Resume at **Phase 3: UI port**.
+- Phase 0 through Phase 3 are complete.
+- Resume at **Phase 4: auth** — it needs `GOOGLE_CLIENT_ID`,
+  `GOOGLE_CLIENT_SECRET` and `AUTH_SECRET` in `.env` first.
 - The verified Phase 2 exit has 425 recipes: 235 active, 190 rejected and zero
   pending, with zero duplicate source URLs.
 - Semantic enrichment mapped 4,456 of 4,617 ingredient rows. The remaining 161
   compound/alternative lines intentionally retain renderable `raw_text` and
   are a successful terminal condition, not retryable failures.
+- The planner UI at `/` is live: server-rendered browse, cached photos, picks
+  and grocery receipt in `localStorage`, TanStack Query polling and the
+  "N new recipes" pill. `meal-prep-planner.jsx` is retired.
 - Serious Eats is approved and enabled.
 - Classpop is intentionally removed everywhere.
 - GypsyPlate currently returns HTTP 403 for both sitemap endpoints. Its run is
@@ -32,8 +36,8 @@ Do not restart completed phases or re-research facts already recorded there.
 - `apps/worker` — polite discovery, JSON-LD extraction, ingredient matching,
   image caching, persistence, pg-boss jobs and cron.
 - `packages/db` — Drizzle schema, migrations, seed and database client.
-- `packages/shared` — client-safe contracts, vocabularies, source configuration
-  and validated environment handling.
+- `packages/shared` — client-safe contracts, vocabularies, display formatting,
+  grocery aggregation, source configuration and validated environment handling.
 - `apps/worker/test/fixtures` — real committed source HTML. Keep it; tests must
   not crawl the internet.
 - `PROGRESS.md` — durable implementation log and task checklist. Update it when
@@ -74,27 +78,36 @@ Host-side database URL:
 postgresql://recipes:recipes@localhost:5432/recipes
 ```
 
-Database-backed tests require the Compose database to be running. After any
-`package.json` change, Compose's anonymous dependency volumes are stale. Rebuild
-with:
+Database-backed tests require the Compose database to be running *and*
+`DATABASE_URL` exported into the test process:
 
 ```bash
-docker compose down -v
-docker compose up --build -d
+DATABASE_URL=postgresql://recipes:recipes@localhost:5432/recipes corepack pnpm test
 ```
 
-`down -v` deletes this project's local database and cached-image volumes, so
-first confirm that a clean reset is actually intended.
+After any `package.json` change, Compose's anonymous dependency volumes are
+stale. Refresh only those; do **not** reach for `down -v`, which deletes
+`pgdata` and with it every crawled and enriched recipe:
+
+```bash
+docker compose build
+docker compose rm -svf web worker migrate   # anonymous volumes only
+docker compose up -d
+```
+
+`docker compose down -v` remains the right command for a deliberate clean
+reset, and only for that.
 
 ## Verification baseline
 
-At the Phase 2 checkpoint:
+At the Phase 3 checkpoint:
 
-- `corepack pnpm test` — 524 passing (shared 45, db 20, worker 459).
+- `corepack pnpm test` (with `DATABASE_URL`) — 551 passing (shared 72, db 20,
+  worker 459).
 - `corepack pnpm typecheck` — clean across all workspaces.
 - Production Next.js build — passing.
-- `/api/health` — Phase 2 healthy with 425 recipes.
-- `/ops` and `/api/recipes` — HTTP 200.
+- `/api/health` — healthy with 425 recipes.
+- `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file` — HTTP 200.
 
 For a change, run the focused test first, then the full relevant suite. Verify
 database, queue, crawl or UI exit criteria directly rather than relying only on

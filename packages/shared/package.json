@@ -9,6 +9,8 @@
     "./env": "./src/env.ts",
     "./vocab": "./src/vocab.ts",
     "./units": "./src/units.ts",
+    "./format": "./src/format.ts",
+    "./grocery": "./src/grocery.ts",
     "./schemas": "./src/schemas.ts",
     "./ingredients": "./src/ingredients.ts",
     "./scan-jobs": "./src/scan-jobs.ts",

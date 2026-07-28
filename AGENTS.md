@@ -13,16 +13,21 @@ Do not restart completed phases or re-research facts already recorded there.
 
 ## Current checkpoint
 
-- Phase 0 through Phase 5 are complete.
-- Resume at **Phase 6: ratings** — the after-cooking flow: 1–5 stars, free-text
-  notes and fixed-vocabulary aspect tags. It needs **no migration and no
-  vocabulary work**: `cook_logs` is live, `RATING_ASPECTS` is already in
-  `@recipes/shared/vocab`, and the database already enforces it with the
-  `cook_logs_aspects_vocab` check constraint. What is missing is the API, the
-  store and the UI. See `HANDOFF.md` for the brief.
-- **First, though:** the grocery tab was never clicked through in a browser at
-  the Phase 5 checkpoint (the extension was unavailable). `HANDOFF.md` opens
-  with the ten-minute check.
+- Phase 0 through Phase 6 are complete.
+- Resume at **Phase 7: personalization** — SQL-derived hard rules, an LLM soft
+  profile, batched recipe scoring with a visible one-line reason, and a
+  cold-start guard (`recipe_scores` stays empty below 5 rated recipes). See
+  `HANDOFF.md` for the brief.
+- Phase 6 (ratings) shipped `@recipes/shared/ratings`, `apps/web/src/lib/ratings.ts`,
+  `GET/POST /api/ratings` + `DELETE /api/ratings/:id`, and a "Rate it" section in
+  the detail sheet — star picker, aspect chips, notes, history, remove. Rating
+  requires an account (401 signed out, no `localStorage` draft) because unlike
+  the grocery list there is nothing sensible to migrate on a later sign-in.
+- **First, though:** the grocery tab still hasn't been clicked through in a
+  browser (skipped at the Phase 5 checkpoint *and* again at the start of
+  Phase 6, both times at Peter's direction). The in-app Browser pane — not the
+  Chrome extension — worked fine for driving Phase 6 live, so this is worth
+  doing with that tool. `HANDOFF.md` opens with the ten-minute check.
 - The grocery list is merged in SQL (`apps/web/src/lib/grocery.ts`); unit choice
   and fraction formatting stay in `@recipes/shared` and the two paths meet at
   `finalizeGroceryBuckets()` (amendment A19). `apps/web/test/grocery-sql.integration.test.ts`

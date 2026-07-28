@@ -385,3 +385,45 @@
   .mp-r-item { break-inside: avoid; }
   .mp-aisle { break-after: avoid; }
 }
+
+/* ---------------------------------------------------------------- *
+ *  Phase 6. The after-cooking flow, inside the detail sheet: a star
+ *  rating, aspect tags and a note, plus the reader's own history for
+ *  that recipe.
+ * ---------------------------------------------------------------- */
+.mp-stars { display: flex; gap: 4px; margin-bottom: 12px; }
+.mp-star { font-size: 26px; line-height: 1; color: var(--line); transition: color .12s; }
+.mp-star[data-on="true"] { color: var(--amber); }
+.mp-star:hover { color: var(--amber); }
+
+.mp-chips-wrap { flex-wrap: wrap; overflow-x: visible; padding: 0 0 12px; }
+
+.mp-textarea {
+  display: block; width: 100%; min-height: 72px; resize: vertical;
+  font-family: var(--body); font-size: 14px; color: var(--slate);
+  background: var(--paper); border: 1.5px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 12px;
+}
+.mp-textarea::placeholder { color: #A8949C; }
+
+.mp-cooklogs { list-style: none; padding: 0; margin: 18px 0 0; }
+.mp-cooklog {
+  position: relative; padding: 12px 0; border-bottom: 1px dotted var(--line);
+}
+.mp-cooklog-top { display: flex; align-items: baseline; gap: 8px; }
+.mp-cooklog-stars { color: var(--amber); font-size: 14px; letter-spacing: 1px; }
+.mp-cooklog-date {
+  font-family: var(--mono); font-size: 10.5px; color: var(--beet-soft);
+}
+.mp-cooklog-aspects {
+  font-family: var(--mono); font-size: 11px; color: var(--leaf);
+  margin-top: 4px;
+}
+.mp-cooklog-notes { font-size: 13.5px; line-height: 1.5; margin: 6px 40px 0 0; }
+.mp-cooklog-remove {
+  position: absolute; top: 12px; right: 0;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--beet-soft);
+  border-bottom: 1.5px solid var(--line);
+}
+.mp-cooklog-remove:hover { color: var(--beet); border-color: var(--beet); }

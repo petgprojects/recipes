@@ -6,6 +6,7 @@
 import { useQueries, useQuery, type UseQueryResult } from '@tanstack/react-query';
 import type { GroceryAisleGroup } from '@recipes/shared/grocery';
 import type { CheckedMap, PlannerState, SavedMap } from '@recipes/shared/planner';
+import type { CookLogCreate, CookLogEntry } from '@recipes/shared/ratings';
 import type { RecipeDetail, RecipeSummary } from './recipe-types';
 
 /** PLAN.md §5: "TanStack Query with `refetchInterval` (~5 min)". */
@@ -206,4 +207,36 @@ export function importPlannerState(local: {
   checked: CheckedMap;
 }): Promise<PlannerImportResult> {
   return sendJson<PlannerImportResult>('/api/planner/import', 'POST', local);
+}
+
+// ── Cook logs (Phase 6) ─────────────────────────────────────────────────────
+
+export const cookLogKeys = {
+  list: (recipeId: string) => ['cookLogs', 'list', recipeId] as const,
+};
+
+export function fetchCookLogs(recipeId: string): Promise<CookLogEntry[]> {
+  return getJson<CookLogEntry[]>(`/api/ratings?recipeId=${recipeId}`);
+}
+
+/** Only enabled once there is a signed-in reader — logged out, this 401s. */
+export function useCookLogsQuery(recipeId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: cookLogKeys.list(recipeId),
+    queryFn: () => fetchCookLogs(recipeId),
+    enabled,
+    staleTime: POLL_INTERVAL_MS,
+  });
+}
+
+/** Returns the recipe's whole updated log list, same shape the query caches. */
+export function createCookLog(input: CookLogCreate): Promise<CookLogEntry[]> {
+  return sendJson<CookLogEntry[]>('/api/ratings', 'POST', input);
+}
+
+export function deleteCookLog(id: string, recipeId: string): Promise<CookLogEntry[]> {
+  return sendJson<CookLogEntry[]>(
+    `/api/ratings/${id}?recipeId=${recipeId}`,
+    'DELETE',
+  );
 }

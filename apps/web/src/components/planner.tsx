@@ -270,6 +270,7 @@ export function Planner({
           recipe={open}
           saved={store.saved[open.id] !== undefined}
           batches={store.saved[open.id] ?? 1}
+          signedIn={user !== null}
           onToggleSave={store.toggleSaved}
           onClose={() => setOpenId(null)}
         />

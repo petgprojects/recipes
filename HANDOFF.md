@@ -1,7 +1,7 @@
 # Session Handoff
 
-Current state and the next move. Written 2026-07-28 after the verified Phase 5
-exit (`e5b3b37`, `eca47e0`).
+Current state and the next move. Written 2026-07-28 after the verified Phase 6
+exit.
 
 This file is **not** a history — it holds only what still constrains the code.
 `PROGRESS.md` is the archive: every amendment (A1–A19), why each decision was
@@ -15,10 +15,14 @@ repository map, commands and working rules.
 
 ### 1. Ten minutes in a browser, first
 
-Phase 5's UI was never clicked through — the Chrome extension was unavailable
-that session. Phases 3 and 4 were both driven live and **both turned up bugs
-only a browser could find**, so this is not a formality. Load `/`, save two or
-three recipes, then on the **Grocery list** tab check:
+Phase 5's grocery **tab** — print preview, copy-as-text, check-off persistence
+— still has not been clicked through live. It was skipped again at the start
+of Phase 6, deliberately, not forgotten: Peter judged the Chrome extension
+wouldn't connect and asked to go straight to ratings. It turned out the in-app
+Browser pane (not the Chrome extension) works fine in this environment and
+drove the whole Phase 6 flow end-to-end, so this is worth ten minutes with
+that tool before Phase 7. Load `/`, save two or three recipes, then on the
+**Grocery list** tab check:
 
 - the list renders, signed out and signed in;
 - **Print** previews the receipt alone — no masthead, tabs or browse grid
@@ -28,37 +32,27 @@ three recipes, then on the **Grocery list** tab check:
 
 Everything server-side is covered by tests; nothing visual is.
 
-### 2. Phase 6 — Ratings
+### 2. Phase 7 — Personalization loop (the payoff)
 
-The after-cooking flow: 1–5 stars, free-text notes, and fixed-vocabulary aspect
-tags. This closes reqs.md goal 4 and is what makes goal 5 (Phase 7) possible —
-free text alone cannot drive a deterministic filter.
+PLAN.md §5: nightly, per user — (1) derive hard rules deterministically in SQL
+(`median(rating) WHERE total_minutes > 60` etc. → `user_preferences.hard_rules`,
+applied as a SQL filter, not a prompt), (2) derive a short prose soft profile
+with an LLM call over the rating history → `user_preferences.profile`, (3) score
+new recipes in the daily scan with a batched prompt → `recipe_scores.score` plus
+a one-line human-readable `reason`. **Cold start:** scoring only runs once a
+user has ≥5 rated recipes; below that `recipe_scores` stays empty and browse
+sorts by `published_at DESC` with source rating as a tiebreak. Hard rules need
+≥5 observations *in the relevant bucket* before they're emitted. Show active
+rules in the UI with a switch to disable each — PLAN.md is explicit that "a
+filter you can't see is indistinguishable from a bug."
 
-**More already exists than you would guess. Check before you build:**
-
-- `cook_logs` is migrated and live: `rating` with a `between 1 and 5` check,
-  `aspects text[]`, `notes`, `cooked_at`, indexed on `(user_id, cooked_at desc)`
-  and on `recipe_id`.
-- `RATING_ASPECTS` is already in `@recipes/shared/vocab` — `quick`, `slow`,
-  `cheap`, `expensive`, `tasty`, `bland`, `reheats_well`, `soggy_leftovers`,
-  `too_much_cleanup`, `would_repeat` — with an `isRatingAspect()` guard.
-- The database **already enforces that vocabulary**: `cook_logs_aspects_vocab`
-  is a live `CHECK (aspects <@ ARRAY[...])` generated from the same constant.
-- `user_preferences` and `recipe_scores` exist too, unused until Phase 7.
-
-So Phase 6 needs **no migration and no vocabulary work**. What is missing is the
-API, the store and the UI. Follow the Phase 4/5 split that is already in place:
-
-- wire schemas and any pure merge rules → `@recipes/shared` (next to
-  `planner.ts`), because the route and the client both have to agree with them;
-- SQL → `apps/web/src/lib/` (next to `planner.ts` and `grocery.ts`);
-- the route under `apps/web/src/app/api/`, using `withUser()` from
-  `lib/planner-route.ts` — unlike the grocery list, rating something genuinely
-  does require an account, so a 401 is the right answer here.
-
-Do not widen the aspect list without changing `RATING_ASPECTS`; the check
-constraint is generated from it and a stray tag will fail the insert, which is
-the intended behaviour.
+`user_preferences` and `recipe_scores` already exist in the schema, unused
+until now. `cook_logs` is what Phase 7 reads from — Phase 6 (see below) is what
+populates it, and there are 0 rows in it right now (the manual test data was
+removed), so Phase 7's cold-start path is the only one exercisable until real
+ratings accumulate. Consider seeding a handful of synthetic `cook_logs` rows for
+development, and delete them before calling the phase done, the same way the
+Phase 4/5 probe rows were removed.
 
 ---
 
@@ -70,14 +64,19 @@ the intended behaviour.
   render from `raw_text` — a successful terminal condition, not a backlog.
 - **2 users**: seeded `dev@local` and Peter's Google account. **0**
   `saved_recipes`, **0** `grocery_checks`, **0** `cook_logs` — every probe row
-  from Phases 4 and 5 was removed.
+  from Phases 4, 5 and 6 was removed.
 - OpenRouter spend to date ≈ **$0.31**.
 
-Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **582
-passing** (shared 95, db 20, worker 461, web 8); four typechecks clean;
+Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **601
+passing** (shared 104, db 20, worker 461, web 16); four typechecks clean;
 production build clean; all four secrets absent from `apps/web/.next/static`;
-`/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file` and
-`POST /api/grocery` all 200 with the Compose stack up.
+`/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file`,
+`POST /api/grocery`, `GET/POST /api/ratings` and `DELETE /api/ratings/:id` all
+respond correctly with the Compose stack up. The ratings flow (star picker,
+aspect chips, note, history, remove) was driven live through the in-app Browser
+pane, signed in via a temporary local `DEV_AUTH_FALLBACK=true` (reverted after
+— see the Phase 6 log entry in PROGRESS.md for exactly how, if you need to
+repeat it).
 
 ---
 
@@ -130,6 +129,27 @@ Each one has a plausible-looking wrong version, and most fail silently.
   lexically-distant decisions, not a stricter regex.
 - Repairs go through `apps/worker/scripts/repair-mismapped-ingredients.ts`
   (dry run unless `--apply`), which returns rows to the backfill queue.
+
+### Ratings (Phase 6)
+
+- **Rating requires an account — there is no `localStorage` draft.**
+  `/api/ratings` is `withUser()`-wrapped like every planner mutation, so signed
+  out it is a 401, and `RatingForm` renders a sign-in prompt instead of a form.
+  Unlike the grocery list this is deliberate and permanent, not a gap to close:
+  a cook log with nowhere to migrate it into on sign-in is just data loss.
+- **Delete is scoped to the owner, not just the id.** `deleteCookLog(userId,
+  id, recipeId)` deletes `where id = ... and user_id = ...`. An id that isn't
+  the caller's matches no row and no-ops silently — same response shape as one
+  already gone. Covered live in `ratings.integration.test.ts`.
+- **All three endpoints answer with the recipe's whole log list**, not just the
+  row touched — same "mutation returns the full state" shape the planner routes
+  use, so the client's cache update is one `setQueryData` call regardless of
+  which of GET/POST/DELETE produced it.
+- **Do not widen `RATING_ASPECTS` without knowing `cook_logs_aspects_vocab` is
+  generated from it.** A stray tag fails the insert with a database error, not
+  a friendly 400 — `cookLogCreateSchema`'s `ratingAspectSchema` (from
+  `packages/shared/src/schemas.ts`, reused rather than redefined) is what turns
+  that into a 400 before it reaches SQL.
 
 ### Auth and planner state (A15, A16, A17)
 

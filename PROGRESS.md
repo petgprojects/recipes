@@ -513,7 +513,29 @@ removes it structurally.
       unavailable this session, so the grocery **tab** — print dialog, clipboard
       button, check-off round-trip — has not been clicked through live; the
       route, both SQL paths and the plain-text rendering are covered by tests.*
-- [ ] **Phase 6 — Ratings.** 1–5 stars, notes, fixed-vocabulary aspect tags.
+- [x] **Phase 6 — Ratings.** ✅ **COMPLETE.**
+    - [x] `@recipes/shared/ratings`: `cookLogCreateSchema` (1–5 rating, fixed
+          aspect vocab via the existing `ratingAspectSchema`, bounded notes),
+          reusing `uuidSchema`/`ratingAspectSchema` that Phase 2 had already
+          put in `schemas.ts` for this
+    - [x] `lib/ratings.ts`: list/create/delete over `cook_logs`, with the same
+          "check the recipe exists before the insert" guard `setSavedRecipe`
+          uses, so a stale id 400s instead of a foreign-key 500
+    - [x] `GET/POST /api/ratings`, `DELETE /api/ratings/:id` — all `withUser()`,
+          so signed-out is a 401, not a `localStorage` draft (this flow
+          genuinely needs an account, unlike the grocery list)
+    - [x] Detail-sheet "Rate it" section: star picker, aspect chips, notes,
+          the reader's own history for that recipe with a remove action
+      *Exit verified live (via the in-app Browser pane, not the Chrome
+      extension — that worked fine here): logged a 4-star "Quick / Would
+      repeat" cook on Kalua Pork with a note, confirmed it, its date, aspects
+      and note render correctly, survived a full page reload, and removed
+      cleanly, restoring the empty-history state. Signed out, the form is
+      replaced by "Sign in to log how it turned out." 601 tests passing
+      (shared 104, db 20, worker 461, web 16 — 8 new integration tests against
+      the real database), four typechecks clean, production build clean, new
+      routes `/api/ratings` and `/api/ratings/[id]` registered. `cook_logs` is
+      back to 0 rows after the manual test.*
 - [ ] **Phase 7 — Personalization.** SQL-derived hard rules, LLM soft profile,
       batched scoring with visible reasons, cold-start guards.
 
@@ -883,3 +905,47 @@ unlike Phases 3 and 4 the grocery **tab** was not clicked through in a real
 browser: the print dialog, the clipboard button and the check-off round-trip
 against the new list are covered by tests and by hand-checked API responses, not
 by a human-visible page. Worth ten minutes at the start of Phase 6.
+
+### 2026-07-28 — Phase 6, ratings
+Skipped the outstanding Phase 5 browser check at Peter's direction and went
+straight to Phase 6. Turned out less new work was needed than PLAN.md implies:
+`cook_logs`, `RATING_ASPECTS` and the `cook_logs_aspects_vocab` check
+constraint were already live, and `packages/shared/src/schemas.ts` already
+exported `uuidSchema` and `ratingAspectSchema` — `z.enum(RATING_ASPECTS)`,
+sitting unused since Phase 2. Phase 6 is the API, the store and the UI over
+what already existed, following the Phase 4/5 split exactly:
+`@recipes/shared/ratings` for the wire schema, `apps/web/src/lib/ratings.ts`
+for the SQL, `withUser()` for the route.
+
+**Rating genuinely needs an account.** Unlike the grocery list, there is no
+signed-out draft worth reconciling later — a cook log with nowhere to migrate
+it into is just data loss waiting to happen — so `/api/ratings` answers 401
+signed out and the UI swaps in "Sign in to log how it turned out." rather than
+a `localStorage` fallback.
+
+**Delete is scoped to the owner, not just the id.** `deleteCookLog(userId, id,
+recipeId)` deletes `where id = ... and user_id = ...`; a mismatched id is a
+silent no-op, same as one already gone. Covered live in
+`ratings.integration.test.ts` — Alice's delete request for Bob's log id leaves
+Bob's entry untouched.
+
+**The Chrome extension still didn't connect, but the in-app Browser pane did**,
+and drove the whole flow end-to-end: opened the Kalua Pork sheet signed out and
+confirmed the sign-in prompt; flipped `DEV_AUTH_FALLBACK` on locally only
+(reverted after, container recreated to confirm the 401 came back) to log a
+4-star "Quick / Would repeat" cook with a note; confirmed the entry, its date
+and its content render correctly; reloaded the page and confirmed the entry
+survived; removed it and confirmed the history section disappears cleanly.
+`cook_logs` is back to 0 rows.
+
+**Verification.** 601 tests passing (shared 104 — 9 new schema tests, db 20,
+worker 461, web 16 — 8 new integration tests against the real database: empty
+history, log-and-read-back, newest-first ordering that keeps two users apart, a
+rejected unknown-recipe id, ownership-scoped delete, and the aspect/rating
+vocab constraints still firing at the database and not just in Zod). Four
+typechecks clean, production build clean, `/api/ratings` and
+`/api/ratings/[id]` both registered as dynamic routes.
+
+**Still outstanding from Phase 5.** The grocery tab's print/copy/check-off
+round-trip is still only covered by tests, not a live browser click-through —
+skipped again this session at Peter's direction, not forgotten.

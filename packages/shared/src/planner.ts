@@ -102,6 +102,30 @@ export const plannerImportSchema = z.object({
 
 export type PlannerImport = z.infer<typeof plannerImportSchema>;
 
+/**
+ * The body of a grocery-list request (Phase 5).
+ *
+ * A signed-out reader's picks live only in this browser, so the list they are
+ * asking for cannot be derived from anything the server already holds — the
+ * picks have to travel with the request. A signed-in reader sends the same
+ * body and the server ignores it in favour of `saved_recipes`, on the same
+ * principle as the sign-in migration: the account is authoritative.
+ *
+ * `MAX_IMPORT_ENTRIES` is the wrong bound here — that one sizes a one-time
+ * migration of everything a browser ever accumulated. This is one shopping
+ * trip.
+ */
+export const MAX_GROCERY_PICKS = 100;
+
+export const groceryRequestSchema = z.object({
+  picks: z
+    .array(z.object({ recipeId: recipeIdSchema, batches: batchesSchema }))
+    .max(MAX_GROCERY_PICKS)
+    .default([]),
+});
+
+export type GroceryRequest = z.infer<typeof groceryRequestSchema>;
+
 // ── Merge ───────────────────────────────────────────────────────────────────
 
 /** What a migration would actually write, once existing rows are excluded. */

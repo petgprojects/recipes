@@ -102,7 +102,7 @@ const DIMENSION_OF: Record<CanonicalUnit, UnitDimension> = {
  * in recipe writing `T` is tablespoon and `t` is teaspoon. Lower-casing before
  * lookup would silently triple every such quantity.
  */
-const CASE_SENSITIVE_ALIASES: Record<string, CanonicalUnit> = {
+export const CASE_SENSITIVE_UNIT_ALIASES: Record<string, CanonicalUnit> = {
   T: 'tbsp',
   Tb: 'tbsp',
   Tbs: 'tbsp',
@@ -112,7 +112,7 @@ const CASE_SENSITIVE_ALIASES: Record<string, CanonicalUnit> = {
 };
 
 /** Case-insensitive aliases. Keys must be lower-case, trimmed, punctuation-free. */
-const ALIASES: Record<string, CanonicalUnit> = {
+export const UNIT_ALIASES: Record<string, CanonicalUnit> = {
   // mass
   mg: 'mg',
   milligram: 'mg',
@@ -215,13 +215,13 @@ export function normalizeUnit(unit: string | null | undefined): CanonicalUnit | 
   if (unit === null || unit === undefined) return 'each';
 
   const trimmed = unit.trim();
-  const caseSensitive = CASE_SENSITIVE_ALIASES[trimmed];
+  const caseSensitive = CASE_SENSITIVE_UNIT_ALIASES[trimmed];
   if (caseSensitive) return caseSensitive;
 
   // Strip trailing periods ("Tbsp.") and collapse internal whitespace
   // ("fluid  ounces"), then match case-insensitively.
   const key = trimmed.toLowerCase().replace(/\.+$/, '').replace(/\s+/g, ' ').trim();
-  return ALIASES[key] ?? null;
+  return UNIT_ALIASES[key] ?? null;
 }
 
 /** The dimension a unit belongs to, or `null` if the unit is unrecognised. */

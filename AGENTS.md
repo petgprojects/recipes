@@ -13,11 +13,22 @@ Do not restart completed phases or re-research facts already recorded there.
 
 ## Current checkpoint
 
-- Phase 0 through Phase 4 are complete.
-- Resume at **Phase 5: grocery list server-side** — port the aggregation in
-  `@recipes/shared/grocery.ts` to SQL over
-  `saved_recipes × recipe_ingredients × ingredients`. The per-user check-offs
-  already key on `grocery_checks.item_key`, so they need no migration.
+- Phase 0 through Phase 5 are complete.
+- Resume at **Phase 6: ratings** — the after-cooking flow over the existing
+  `cook_logs` table: 1–5 stars, free-text notes and fixed-vocabulary aspect
+  tags. Put the tag vocabulary in `@recipes/shared/vocab`; Phase 7 derives hard
+  rules from it in SQL, so it has to be a closed list, not free text.
+- **First, though:** the grocery tab was never clicked through in a browser
+  this session (the extension was unavailable). See "Outstanding" in
+  `HANDOFF.md`.
+- The grocery list is merged in SQL (`apps/web/src/lib/grocery.ts`); unit choice
+  and fraction formatting stay in `@recipes/shared` and the two paths meet at
+  `finalizeGroceryBuckets()` (amendment A19). `apps/web/test/grocery-sql.integration.test.ts`
+  proves the two agree over the whole corpus — keep it and the shared spec both.
+- The Phase 2 semantic mapper now guards its `existing` claims
+  (`isPlausibleCanonicalMatch`, amendment A18) after an audit found 31 aliases
+  that had merged unrelated items — `ketchup` into `kalamata olives`. The guard
+  prefers a missed merge to a wrong one and will split some true synonyms.
 - Auth.js v5 + Google is live over the existing `users`/`accounts`/`sessions`
   tables. `AUTH_URL` must stay pinned in `docker-compose.yml`: the container
   binds `0.0.0.0`, and Google rejects a `0.0.0.0` `redirect_uri` at the
@@ -26,7 +37,8 @@ Do not restart completed phases or re-research facts already recorded there.
   `dev@local` fallback is opt-in via `DEV_AUTH_FALLBACK` (A15).
 - The verified Phase 2 exit has 425 recipes: 235 active, 190 rejected and zero
   pending, with zero duplicate source URLs.
-- Semantic enrichment mapped 4,456 of 4,617 ingredient rows. The remaining 161
+- Semantic enrichment mapped 4,456 of 4,617 ingredient rows across 789
+  canonical ingredients and 1,733 aliases. The remaining 161
   compound/alternative lines intentionally retain renderable `raw_text` and
   are a successful terminal condition, not retryable failures.
 - The planner UI at `/` is live: server-rendered browse, cached photos,
@@ -46,7 +58,10 @@ Do not restart completed phases or re-research facts already recorded there.
   image caching, persistence, pg-boss jobs and cron.
 - `packages/db` — Drizzle schema, migrations, seed and database client.
 - `packages/shared` — client-safe contracts, vocabularies, display formatting,
-  grocery aggregation, source configuration and validated environment handling.
+  grocery bucket finalization and plain-text rendering, source configuration and
+  validated environment handling.
+- `apps/web/test` — database-backed suites for the app's queries. Added in
+  Phase 5; needs `DATABASE_URL` like the worker's integration tests.
 - `apps/worker/test/fixtures` — real committed source HTML. Keep it; tests must
   not crawl the internet.
 - `PROGRESS.md` — durable implementation log and task checklist. Update it when
@@ -123,14 +138,15 @@ second instance is genuinely needed.
 
 ## Verification baseline
 
-At the Phase 4 checkpoint:
+At the Phase 5 checkpoint:
 
-- `corepack pnpm test` (with `DATABASE_URL`) — 564 passing (shared 85, db 20,
-  worker 459).
+- `corepack pnpm test` (with `DATABASE_URL`) — 582 passing (shared 95, db 20,
+  worker 461, web 8).
 - `corepack pnpm typecheck` — clean across all workspaces.
 - Production Next.js build — passing.
 - `/api/health` — healthy with 425 recipes.
-- `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file` — HTTP 200.
+- `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file` — HTTP 200,
+  and `POST /api/grocery` — HTTP 200.
 
 For a change, run the focused test first, then the full relevant suite. Verify
 database, queue, crawl or UI exit criteria directly rather than relying only on

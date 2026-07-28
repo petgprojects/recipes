@@ -18,13 +18,14 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { CATEGORY_FILTER_ALL, CATEGORY_FILTER_UI } from '@recipes/shared/vocab';
-import {
-  aggregateGroceries,
-  countGroceryItems,
-  type GroceryRecipeInput,
-} from '@recipes/shared/grocery';
+import { countGroceryItems } from '@recipes/shared/grocery';
 import type { PlannerState } from '@recipes/shared/planner';
-import { useRecipesQuery, useSavedRecipeDetails } from '@/lib/api';
+import {
+  useGroceryQuery,
+  useRecipesQuery,
+  useSavedRecipeDetails,
+  type GroceryPick,
+} from '@/lib/api';
 import { usePlannerStore, type PlannerUser } from '@/lib/saved-store';
 import type { RecipeSummary } from '@/lib/recipe-types';
 import { AuthControls } from './auth-controls';
@@ -94,34 +95,20 @@ export function Planner({
     [savedIds, byId, savedDetails],
   );
 
-  const groceryInput = useMemo<GroceryRecipeInput[]>(
-    () =>
-      savedIds.flatMap((id, index) => {
-        const detail = savedDetails[index]?.data;
-        if (detail === undefined) return [];
-        return [
-          {
-            id: detail.id,
-            title: detail.title,
-            batches: store.saved[id] ?? 1,
-            ingredients: detail.ingredients.map((line) => ({
-              ingredientId: line.ingredientId,
-              name: line.name ?? '',
-              rawText: line.rawText,
-              aisle: line.aisle,
-              qty: line.qty,
-              unit: line.unit,
-              optional: line.optional,
-            })),
-          },
-        ];
-      }),
-    [savedIds, savedDetails, store.saved],
+  /**
+   * Phase 5: the list is merged in SQL, so all the client sends is the picks.
+   * A signed-in reader's `saved_recipes` is authoritative and the server
+   * ignores this — it is sent anyway so there is one request shape either way.
+   */
+  const groceryPicks = useMemo<GroceryPick[]>(
+    () => savedIds.map((recipeId) => ({ recipeId, batches: store.saved[recipeId] ?? 1 })),
+    [savedIds, store.saved],
   );
 
-  const groceries = useMemo(() => aggregateGroceries(groceryInput), [groceryInput]);
+  const groceryQuery = useGroceryQuery(groceryPicks, groceryPicks.length > 0);
+  const groceries = useMemo(() => groceryQuery.data ?? [], [groceryQuery.data]);
   const itemCount = countGroceryItems(groceries);
-  const groceriesLoading = savedDetails.some((query) => query.isPending);
+  const groceriesLoading = groceryQuery.isPending && groceryPicks.length > 0;
 
   const visible = useMemo(
     () =>
@@ -271,6 +258,7 @@ export function Planner({
             totalServings={totalServings}
             itemCount={itemCount}
             loading={groceriesLoading}
+            error={groceryQuery.error}
             onToggle={store.toggleChecked}
             onClearChecks={store.clearChecked}
           />

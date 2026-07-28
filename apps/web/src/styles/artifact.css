@@ -348,3 +348,40 @@
  * ---------------------------------------------------------------- */
 .mp-grid-single { grid-template-columns: 1fr; }
 .mp-card-acts-spaced { margin-top: 24px; }
+
+/* ---------------------------------------------------------------- *
+ *  Phase 5. The list is merged in SQL now; what is new here is the
+ *  toolbar above the receipt and the printed page.
+ * ---------------------------------------------------------------- */
+.mp-bar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Printing a shopping list is the one thing this page is *for* away from a
+   screen, so the printed page is the receipt and nothing else: no masthead, no
+   tabs, no browse grid, and no controls the paper cannot honour. The receipt
+   itself already looks like paper — it just has to stop being a card floating
+   on a coloured background. */
+@media print {
+  html { background: #fff; }
+  .mp-head,
+  .mp-tabs,
+  .mp-chips,
+  .mp-pill,
+  .mp-grid,
+  .mp-note,
+  .mp-scrim,
+  .mp-no-print { display: none !important; }
+
+  .mp-wrap { max-width: none; padding: 0; }
+  .mp-receipt { box-shadow: none; padding: 0; }
+  .mp-tear { display: none; }
+
+  /* An unticked box has transparent glyph colour on screen, which prints as an
+     empty square — correct. A ticked one prints as a filled leaf-green box,
+     which most printers render as a muddy grey; keep the tick and drop the
+     fill so the paper stays legible. */
+  .mp-r-item[data-on="true"] .mp-box {
+    background: none; border-color: var(--beet-soft); color: var(--beet);
+  }
+  .mp-r-item { break-inside: avoid; }
+  .mp-aisle { break-after: avoid; }
+}

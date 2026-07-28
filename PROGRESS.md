@@ -267,6 +267,119 @@ Signed-in edits deliberately do **not** write to `localStorage`. The browser's
 anonymous state is left exactly as it was, so signing out returns to it rather
 than to a half-copy of the account.
 
+### A18 — The semantic mapper's `existing` claim is guarded, and a missed merge beats a wrong one
+*Phase 5, from the audit PLAN.md's Phase 5 note asked for.*
+
+A sampled audit of the Phase 2 mapping before putting these joins under SQL
+found a systematic defect. The provider-facing schema pins `canonical_name` to
+a `z.enum` of the **entire** canonical vocabulary — 774 names at the time — so
+once the model emits `"action":"existing"` the constrained decoder *must* pick
+some member of that enum. When the right answer is not in there, it picks a
+neighbour. That produced `ketchup` → `kalamata olives`, `tahini` /
+`tapioca flour` / `tapioca starch` / `tamarind pulp` / `tequila` →
+`taco seasoning`, `cauliflower` → `capers`, `brandy` / `branzino` / `burrata` →
+`brown rice`, `chopped chives` → `chickpeas`, `swiss chard` →
+`sweet potatoes`, `white wine vinegar` → `white rice`, and a bunch of flat-leaf
+parsley → `mushrooms`.
+
+Two properties made it worse than a one-off. Every wrong decision is written to
+`ingredient_aliases`, and the deterministic matcher answers from there first, so
+one bad decision re-maps every future line with that spelling — `ketchup` was
+wrong eight times from a single mistake. And the failure is silent: the row
+still renders from `raw_text`, so nothing looks broken until the wrong canonical
+merges a quantity into someone else's item on a grocery list, which is exactly
+what Phase 5 makes matter.
+
+**The guard.** `isPlausibleCanonicalMatch()` in `@recipes/shared/ingredients`
+rejects an `existing` decision whose input and canonical share no identity
+word, ignoring preparation, packaging and colour words. A rejected decision is
+rewritten as `action: "new"` on the reader's own words rather than being merged
+into someone else's ingredient. This is why `existing` decisions now carry an
+`aisle` even though the database already knows it: without one, a rejected
+decision would need a second provider round-trip to find out where the item is
+sold.
+
+**The guard is deliberately blunt, and it is blunt in one direction.** It
+cannot tell `garbanzo beans` → `chickpeas` (right) from `chopped chives` →
+`chickpeas` (wrong), so it rejects both. A wrongly-rejected synonym becomes its
+own canonical and shows up as a second line on the receipt, which a reader can
+see and shrug at; a wrong merge is a quantity nobody can tell is wrong. The
+existing correct synonyms in `ingredient_aliases` are matched exactly and never
+reach the guard, so this constrains only names the corpus has not seen before.
+
+**What it does not catch.** Names that share a real word but are different
+products — `green bell pepper` → `red bell pepper`, `green cabbage` →
+`red cabbage`, `grated lime zest` → `lemon zest`, `butter lettuce leaves` →
+`butter`. Those were repaired by hand in the data and remain a known limitation
+of a lexical test.
+
+**The repair.** `apps/worker/scripts/repair-mismapped-ingredients.ts` holds the
+31 hand-read alias corrections, deletes them, and returns the 63 affected rows
+to the backfill queue by nulling `ingredient_id`. It identifies rows the way the
+backfill does — parse the line, take `ingredientAliasKey()` of the parsed name —
+not by matching text against `raw_text`, which would both miss rows and catch
+rows that reached the same ingredient by a correct alias. It is a dry run
+unless given `--apply`.
+
+Arguable merges were deliberately left alone: `cumin seeds` → `ground cumin`,
+`nonstick cooking spray` → `baking spray`, `vanilla bean paste` →
+`vanilla extract`. They are debatable, not wrong, and re-mapping them would
+spend provider calls to probably land in the same place.
+
+### A19 — SQL merges the grocery list; TypeScript still chooses the units
+*Phase 5.*
+
+PLAN.md §5 says to port the aggregation to SQL "with the batch multiplier and
+in-dimension unit conversion". The merge moved; the printing did not, and the
+split is on purpose.
+
+The query in `apps/web/src/lib/grocery.ts` owns everything that decides *which
+lines share a line on the receipt*: the join, the batch multiplier,
+`grocery_checks.item_key`, whose name and aisle win, and the per-unit
+subtotals. It stops before deciding whether a total reads `1⅛ cup` or
+`18 tbsp`, because that needs the conversion table in `@recipes/shared/units`
+and the vulgar fractions in `@recipes/shared/format`. Reimplementing those in
+SQL would give this project two copies of its unit vocabulary in two languages,
+and the copies would drift — quietly, in a way that only shows up as a wrong
+number on a shopping list.
+
+So both implementations converge on `finalizeGroceryBuckets()`. What *is*
+generated into SQL is the unit alias table itself: `unitAliasValues()` walks the
+exact records `normalizeUnit()` uses and emits one row per alias, with the
+dimension key taken from `unitDimensionKey()` rather than recomputed. Adding a
+unit to `units.ts` puts it in the query too, with nothing to remember.
+
+Three things had to agree character for character with the TypeScript, because
+a difference in any of them would give the same shopping line two different
+`item_key`s depending on which path built it, and a reader's check-offs would
+silently stop matching their list:
+
+1. the `slugify()` of an unmapped row's `raw_text` — lower, NFKD, non-alphanumerics
+   to dashes, trim dashes, then cut to 80 (that order);
+2. `normalizeUnit()`'s case-sensitive-first lookup — `T` is tablespoon and `t`
+   is teaspoon, so lower-casing before the lookup would triple every `t` — and
+   its treatment of a NULL unit as `''`, which reaches `each`;
+3. the `unit:` fallback slug for an unrecognised unit, which is *not*
+   dash-trimmed, unlike the raw-text slug.
+
+**The batch multiplier multiplies in `float8`, not `numeric`.** The in-memory
+implementation multiplies IEEE-754 doubles; a `numeric` product cast to `float8`
+afterwards rounds differently in the last bit, and the differential test
+compares exact values.
+
+**Bucket order is now part of the contract.** Two items can sort equal by name —
+the same ingredient bought by the clove and by the each — and the sort that
+groups them is stable, so insertion order breaks the tie. A `group by` returns
+rows in whatever order it likes, so `finalizeGroceryBuckets()` sorts by the
+bucket's `order` before inserting. Without this the two implementations differ
+by a swap of two adjacent lines, which is exactly the kind of difference nobody
+would notice by eye.
+
+`apps/web/test/grocery-sql.integration.test.ts` runs both implementations over
+every active recipe in the database and demands they agree.
+`packages/shared/test/grocery.test.ts` remains the specification of what a
+correct list *is*; neither suite is sufficient alone.
+
 ### A3 — Source list resolved (PLAN.md §8, open question 11)
 Budget Bytes, Pinch of Yum, Downshiftology, GypsyPlate, Skinnytaste, The
 Kitchn, Love & Lemons, Serious Eats.
@@ -377,8 +490,29 @@ removes it structurally.
       signed-in edits; sign-out returning to the browser's own 2 picks with
       `/api/planner` answering 401. Merge semantics, idempotence and the
       stale-recipe skip additionally exercised against a minted session.*
-- [ ] **Phase 5 — Grocery list server-side.** SQL aggregation, per-user checks,
-      print + copy-to-clipboard.
+- [x] **Phase 5 — Grocery list server-side.** ✅ **COMPLETE.**
+    - [x] Sampled audit of the Phase 2 semantic mapping; 31 poisoned aliases and
+          63 rows found, repaired and re-mapped (A18)
+    - [x] `isPlausibleCanonicalMatch()` guard on the mapper's `existing` claim,
+          plus the always-present `aisle` that lets a rejection land (A18)
+    - [x] Aggregation merged in SQL over
+          `saved_recipes × recipe_ingredients × ingredients`, with the batch
+          multiplier and in-dimension merging (A19)
+    - [x] `POST /api/grocery`, serving `saved_recipes` when signed in and the
+          request's picks when signed out — the planner still works signed out
+    - [x] Receipt aesthetic unchanged; the client sends picks instead of
+          fetching every saved recipe's detail
+    - [x] Printable view (`@media print`) and copy-to-clipboard as plain text
+    - [x] Differential integration suite proving SQL ≡ `aggregateGroceries()`
+          over the whole active corpus
+      *Exit verified: 582 tests passing (shared 95, db 20, worker 461, web 8),
+      four typechecks clean, production build clean, secrets absent from the
+      client bundle, and `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`,
+      `/api/images/:file`, `POST /api/grocery` all 200 against the Compose
+      stack after a full dependency-volume refresh. The browser extension was
+      unavailable this session, so the grocery **tab** — print dialog, clipboard
+      button, check-off round-trip — has not been clicked through live; the
+      route, both SQL paths and the plain-text rendering are covered by tests.*
 - [ ] **Phase 6 — Ratings.** 1–5 stars, notes, fixed-vocabulary aspect tags.
 - [ ] **Phase 7 — Personalization.** SQL-derived hard rules, LLM soft profile,
       batched scoring with visible reasons, cold-start guards.
@@ -678,3 +812,74 @@ signed-in edits; sign-out returning to those 2 with `/api/planner` answering
 throwaway second instance. All probe rows removed; the database is back to 425
 recipes, 235 active, 190 rejected, 0 pending, with no `saved_recipes` or
 `grocery_checks` rows.
+
+### 2026-07-28 — Phase 5 complete: the grocery list moves into the database
+
+**The audit came first, and it found something.** PLAN.md's Phase 5 note asked
+for a sampled audit of the Phase 2 ingredient mapping before these joins went
+under SQL, on the theory that a wrong canonical is harmless while it only has
+to render and expensive once it has to merge. A random sample of 60 mapped rows
+was clean. The tail was not: `ketchup` → `kalamata olives`, `tahini` and
+`tapioca flour` and `tamarind pulp` → `taco seasoning`, `cauliflower` →
+`capers`, `brandy` → `brown rice`, `white wine vinegar` → `white rice`, a bunch
+of flat-leaf parsley → `mushrooms`.
+
+The shape of the errors gave away the cause. They are not semantic near-misses;
+they are *alphabetical* ones. The provider-facing schema pins `canonical_name`
+to a `z.enum` of all 774 canonical names, so a model that has committed to
+`"action":"existing"` cannot then decline — the decoder has to emit some member
+of the enum, and when the right answer is not in it, it emits a neighbour. And
+because every decision is written to `ingredient_aliases` and the deterministic
+matcher answers from there first, one mistake is permanent and repeats:
+`ketchup` was wrong eight times from a single bad decision.
+
+31 aliases and 63 of 4,456 mapped rows (1.4%). All 31 read by hand, deleted,
+their rows returned to the backfill queue, and re-mapped through the new guard
+in one run — `ketchup` → `ketchup`, `cauliflower` → `cauliflower`, the parsley
+back to `flat-leaf parsley`. The alias table grew by 6 and the canonical table
+by 15, which is what a mapper that is allowed to say "I don't have this one"
+looks like. Amendment A18 records the guard, and records that it is blunt in one
+direction on purpose: it also rejects `garbanzo beans` → `chickpeas`, and a
+missed merge is a second line on a receipt while a wrong merge is a quantity
+nobody can see is wrong.
+
+**Then the port.** The merge is now a join and a `group by`; the unit choice and
+the vulgar fractions stayed in `@recipes/shared`. Amendment A19 explains why
+that seam is where it is, and lists the three expressions that had to match the
+TypeScript character for character — the raw-text slug, `normalizeUnit()`'s
+case-sensitive-first lookup, and the not-dash-trimmed `unit:` fallback — because
+a difference in any of them gives the same shopping line two different
+`item_key`s and a reader's check-offs quietly stop matching their list. The unit
+alias table is generated into the query from the same records `normalizeUnit()`
+reads, so there is no second copy to drift.
+
+**The differential test earned its keep immediately.** It failed on the first
+run, and not on anything the eye would have caught: `garlic cloves` appears
+twice on one receipt — once by the clove, once by the each — the two sort equal
+by name, the sort is stable, and so map insertion order decided which came
+first. In memory that is line order; out of a `group by` it is arbitrary.
+`finalizeGroceryBuckets()` now sorts by bucket order before inserting. The
+suite compares both implementations over every active recipe.
+
+**Signed out still works.** A signed-out reader's picks exist only in their
+browser, so `POST /api/grocery` takes them in the body; a signed-in reader sends
+the same body and the server ignores it in favour of `saved_recipes`, on A17's
+principle that the account wins. The route deliberately does not use
+`withUser()` — a 401 would be the wrong answer to "here are my picks, what do I
+buy".
+
+**Cost.** Nothing beyond the re-mapping run: 63 rows across ~31 distinct names,
+inside the $1/day cap. The port itself makes no LLM calls.
+
+**Verification.** 582 tests passing (shared 95, db 20, worker 461, web 8 — the
+web app has a test suite for the first time, which is what the differential
+suite needed). Four typechecks clean, production build clean, all four secrets
+absent from the client bundle, every endpoint 200 after the documented
+dependency-volume refresh, and both probe users deleted — the database is back
+to 2 users, 0 `saved_recipes`, 0 `grocery_checks`.
+
+**Not verified live.** The Chrome extension was not connected this session, so
+unlike Phases 3 and 4 the grocery **tab** was not clicked through in a real
+browser: the print dialog, the clipboard button and the check-off round-trip
+against the new list are covered by tests and by hand-checked API responses, not
+by a human-visible page. Worth ten minutes at the start of Phase 6.

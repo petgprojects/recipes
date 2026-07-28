@@ -4,6 +4,7 @@
  */
 
 import { useQueries, useQuery, type UseQueryResult } from '@tanstack/react-query';
+import type { GroceryAisleGroup } from '@recipes/shared/grocery';
 import type { CheckedMap, PlannerState, SavedMap } from '@recipes/shared/planner';
 import type { RecipeDetail, RecipeSummary } from './recipe-types';
 
@@ -120,7 +121,7 @@ export function useRecipeDetail(id: string | null) {
   });
 }
 
-/** Details for every saved recipe — the grocery list's raw material. */
+/** Details for every saved recipe — what the picks tab shows. */
 export function useSavedRecipeDetails(ids: readonly string[]): UseQueryResult<RecipeDetail>[] {
   return useQueries({
     queries: ids.map((id) => ({
@@ -128,6 +129,40 @@ export function useSavedRecipeDetails(ids: readonly string[]): UseQueryResult<Re
       queryFn: () => fetchRecipeDetail(id),
       staleTime: POLL_INTERVAL_MS,
     })),
+  });
+}
+
+// ── Grocery list (Phase 5) ──────────────────────────────────────────────────
+
+export const groceryKeys = {
+  list: (picks: GroceryPick[]) => ['grocery', 'list', picks] as const,
+};
+
+export interface GroceryPick {
+  recipeId: string;
+  batches: number;
+}
+
+export function fetchGroceryList(picks: GroceryPick[]): Promise<GroceryAisleGroup[]> {
+  return sendJson<GroceryAisleGroup[]>('/api/grocery', 'POST', { picks });
+}
+
+/**
+ * The receipt, merged in the database.
+ *
+ * Phase 3 fetched `/api/recipes/:id` once per pick and merged in a `useMemo`;
+ * this is one request that returns the finished list. The query key carries the
+ * picks, so changing a batch count refetches — and `placeholderData` keeps the
+ * previous list on screen while it does, because a receipt that blanks out
+ * every time a stepper is clicked reads as breakage.
+ */
+export function useGroceryQuery(picks: GroceryPick[], enabled: boolean) {
+  return useQuery({
+    queryKey: groceryKeys.list(picks),
+    queryFn: () => fetchGroceryList(picks),
+    enabled,
+    placeholderData: (previous: GroceryAisleGroup[] | undefined) => previous,
+    staleTime: POLL_INTERVAL_MS,
   });
 }
 

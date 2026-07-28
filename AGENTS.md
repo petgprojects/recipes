@@ -13,10 +13,13 @@ Do not restart completed phases or re-research facts already recorded there.
 
 ## Current checkpoint
 
-- Phase 0 and Phase 1 are complete.
-- Resume at **Phase 2: LLM enrichment**.
-- The clean Phase 1 exit produced 425 recipes, all with local image references,
-  zero duplicate source URLs, zero LLM tokens and $0 LLM cost.
+- Phase 0, Phase 1 and Phase 2 are complete.
+- Resume at **Phase 3: UI port**.
+- The verified Phase 2 exit has 425 recipes: 235 active, 190 rejected and zero
+  pending, with zero duplicate source URLs.
+- Semantic enrichment mapped 4,456 of 4,617 ingredient rows. The remaining 161
+  compound/alternative lines intentionally retain renderable `raw_text` and
+  are a successful terminal condition, not retryable failures.
 - Serious Eats is approved and enabled.
 - Classpop is intentionally removed everywhere.
 - GypsyPlate currently returns HTTP 403 for both sitemap endpoints. Its run is
@@ -85,12 +88,12 @@ first confirm that a clean reset is actually intended.
 
 ## Verification baseline
 
-At the Phase 1 checkpoint:
+At the Phase 2 checkpoint:
 
-- `corepack pnpm test` — 421 passing.
+- `corepack pnpm test` — 524 passing (shared 45, db 20, worker 459).
 - `corepack pnpm typecheck` — clean across all workspaces.
 - Production Next.js build — passing.
-- `/api/health` — Phase 1 healthy.
+- `/api/health` — Phase 2 healthy with 425 recipes.
 - `/ops` and `/api/recipes` — HTTP 200.
 
 For a change, run the focused test first, then the full relevant suite. Verify
@@ -99,10 +102,10 @@ unit tests.
 
 ## Credentials
 
-- An OpenRouter key is required only for real Phase 2 calls; implementation and
-  mocked tests can proceed without it.
+- `OPENROUTER_API_KEY` is configured in local `.env`. Never print or commit it.
+- Reddit credentials remain unavailable; the production-wired Reddit adapter
+  is disabled and does not block Phase 3.
 - Google OAuth client and test user are configured with callback
   `http://localhost:3000/api/auth/callback/google`. The client ID/secret and
   `AUTH_SECRET` still need to be placed in `.env` before Phase 4.
 - Never print or commit secrets from `.env`.
-

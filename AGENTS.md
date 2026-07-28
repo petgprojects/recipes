@@ -23,11 +23,10 @@ Do not restart completed phases or re-research facts already recorded there.
   the detail sheet — star picker, aspect chips, notes, history, remove. Rating
   requires an account (401 signed out, no `localStorage` draft) because unlike
   the grocery list there is nothing sensible to migrate on a later sign-in.
-- **First, though:** the grocery tab still hasn't been clicked through in a
-  browser (skipped at the Phase 5 checkpoint *and* again at the start of
-  Phase 6, both times at Peter's direction). The in-app Browser pane — not the
-  Chrome extension — worked fine for driving Phase 6 live, so this is worth
-  doing with that tool. `HANDOFF.md` opens with the ten-minute check.
+- The grocery tab's live browser check — carried since Phase 5 — is **done**
+  (2026-07-28). It confirmed what tests could not: the signed-out list merged in
+  TypeScript and the signed-in list merged in SQL render identically, including
+  which lines migrated check-offs land on.
 - The grocery list is merged in SQL (`apps/web/src/lib/grocery.ts`); unit choice
   and fraction formatting stay in `@recipes/shared` and the two paths meet at
   `finalizeGroceryBuckets()` (amendment A19). `apps/web/test/grocery-sql.integration.test.ts`

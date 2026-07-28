@@ -949,3 +949,70 @@ typechecks clean, production build clean, `/api/ratings` and
 **Still outstanding from Phase 5.** The grocery tab's print/copy/check-off
 round-trip is still only covered by tests, not a live browser click-through —
 skipped again this session at Peter's direction, not forgotten.
+
+### 2026-07-28 — the Phase 5 grocery tab, finally clicked through
+
+Closed the item that had been carried since Phase 5. Nothing was wrong; the
+value was in confirming it, and in one result the tests could not have given.
+
+**Signed out.** Saved three recipes (Cowboy Caviar, Kalua Pork, Shrimp and
+Pineapple Skewers), opened the Grocery list tab, and got a 35-item receipt
+across six aisle buckets — Produce, Meat & Seafood, Canned & Jarred, Pantry,
+Spices, Other — with merged quantities and fraction glyphs rendering correctly
+(`½ cup`, `2½ tsp`, `5 tbsp`). Ticking two items struck them through and moved
+the counter to "2 of 35 in the cart"; a reload brought both back.
+
+**Copy as text** put 1,077 characters on the real system clipboard (verified by
+reading it back, not just by trusting the button): the full receipt with `[x]`
+for ticked lines and `[ ]` for the rest, aisle headers intact.
+
+**Print was verified without opening the dialog** — a modal would have frozen
+the browser extension for the rest of the session. Instead the `@media print`
+block from `artifact.css` was applied to the live DOM as an ordinary stylesheet
+and screenshotted. Every selector in it resolves against real elements on that
+tab (`.mp-head`, `.mp-tabs`, `.mp-note`, `.mp-no-print`, `.mp-receipt`,
+`.mp-r-item`×35, `.mp-aisle`×6; `.mp-chips`/`.mp-pill`/`.mp-grid`/`.mp-scrim`
+are zero only because the browse tab is unmounted), and the result is the
+receipt alone — no masthead, tabs, toolbar or grid, ticks and strike-throughs
+preserved. That is the check worth keeping: a print rule fails silently by
+matching nothing.
+
+**Signed in — and this is the part tests could not prove.** With
+`DEV_AUTH_FALLBACK=true` set locally (reverted after; see below), first sign-in
+migrated the three picks and two check-offs into `dev@local`, and the grocery
+tab rendered **the identical 35-item list, with the two migrated check-offs
+landing on exactly the right lines**. Signed out that list is merged in
+TypeScript; signed in it is merged in SQL. So this is amendment A19's invariant
+— the raw-text slug, the case-sensitive unit lookup and the `unit:` fallback
+slug agreeing character for character across two languages — confirmed
+end-to-end against real data in a real browser, not just by the differential
+suite. Ticking a third item wrote `…:count:can` to `grocery_checks` (black
+beans, `1 can`), which also demonstrates the merge-within-a-unit-dimension rule
+picking the right key. Copying signed in produced 1,077 characters again —
+byte-identical in length, since `[x]` and `[ ]` are the same width.
+
+**Two notes worth keeping.**
+
+- `POST /api/ratings` answers **400, not 401, to a malformed body while signed
+  out**, because `parseBody()` runs before `withUser()` in the route. A
+  well-formed request signed out is a 401 as documented. Not a bug — the schema
+  is client-side code anyway — but HANDOFF's "signed out it is a 401" is only
+  true for well-formed requests, and this entry is where that nuance lives.
+- The browser-automation clicks failed silently for the first several attempts.
+  The cause was neither coordinates nor the app: clicks dispatched before React
+  finished hydrating 235 cards land on the DOM and do nothing. Wait for
+  hydration, or drive the element directly, before concluding a handler is
+  broken. (Separately, in this environment screenshots come back scaled 0.907×
+  from the 1280px viewport, so coordinates read off a screenshot are the right
+  ones to pass back.)
+
+**Cleanup.** `DEV_AUTH_FALLBACK` was appended to `.env` and removed again from
+a byte-identical backup; the web container was recreated both ways and
+`GET /api/planner` confirmed back to 401. All probe rows deleted — the database
+is again 2 users, 0 `saved_recipes`, 0 `grocery_checks`, 0 `cook_logs` — and the
+browser's `localStorage` planner keys were cleared.
+
+**Verification.** `corepack pnpm test` with `DATABASE_URL` — **604 passing**
+(shared 107, db 20, worker 461, web 16). The 601 recorded at the Phase 6 exit
+predates commit a18b63c, which added the three shared schema tests; 604 is the
+correct baseline from here.

@@ -13,26 +13,14 @@ repository map, commands and working rules.
 
 ## Start here
 
-### 1. Ten minutes in a browser, first
+### Phase 7 — Personalization loop (the payoff)
 
-Phase 5's grocery **tab** — print preview, copy-as-text, check-off persistence
-— still has not been clicked through live. It was skipped again at the start
-of Phase 6, deliberately, not forgotten: Peter judged the Chrome extension
-wouldn't connect and asked to go straight to ratings. It turned out the in-app
-Browser pane (not the Chrome extension) works fine in this environment and
-drove the whole Phase 6 flow end-to-end, so this is worth ten minutes with
-that tool before Phase 7. Load `/`, save two or three recipes, then on the
-**Grocery list** tab check:
-
-- the list renders, signed out and signed in;
-- **Print** previews the receipt alone — no masthead, tabs or browse grid
-  (`@media print` at the end of `apps/web/src/styles/artifact.css`);
-- **Copy as text** reaches the clipboard, ticked boxes included;
-- ticking an item survives a reload.
-
-Everything server-side is covered by tests; nothing visual is.
-
-### 2. Phase 7 — Personalization loop (the payoff)
+The Phase 5 grocery-tab browser check that used to head this file is **done**
+— see the 2026-07-28 entry in `PROGRESS.md`. Nothing was wrong with it. The one
+result worth carrying forward: the signed-out list (merged in TypeScript) and
+the signed-in list (merged in SQL) render identically down to which lines the
+migrated check-offs land on, so amendment A19's key-agreement invariant is now
+confirmed live and not only by the differential suite.
 
 PLAN.md §5: nightly, per user — (1) derive hard rules deterministically in SQL
 (`median(rating) WHERE total_minutes > 60` etc. → `user_preferences.hard_rules`,
@@ -67,8 +55,8 @@ Phase 4/5 probe rows were removed.
   from Phases 4, 5 and 6 was removed.
 - OpenRouter spend to date ≈ **$0.31**.
 
-Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **601
-passing** (shared 104, db 20, worker 461, web 16); four typechecks clean;
+Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **604
+passing** (shared 107, db 20, worker 461, web 16); four typechecks clean;
 production build clean; all four secrets absent from `apps/web/.next/static`;
 `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file`,
 `POST /api/grocery`, `GET/POST /api/ratings` and `DELETE /api/ratings/:id` all
@@ -133,8 +121,11 @@ Each one has a plausible-looking wrong version, and most fail silently.
 ### Ratings (Phase 6)
 
 - **Rating requires an account — there is no `localStorage` draft.**
-  `/api/ratings` is `withUser()`-wrapped like every planner mutation, so signed
-  out it is a 401, and `RatingForm` renders a sign-in prompt instead of a form.
+  `/api/ratings` is `withUser()`-wrapped like every planner mutation, so a
+  well-formed request signed out is a 401, and `RatingForm` renders a sign-in
+  prompt instead of a form. (A *malformed* one is a 400 even signed out:
+  `parseBody()` runs before `withUser()`. Verified, harmless, but don't "fix"
+  a 400 you were expecting to be a 401.)
   Unlike the grocery list this is deliberate and permanent, not a gap to close:
   a cook log with nowhere to migrate it into on sign-in is just data loss.
 - **Delete is scoped to the owner, not just the id.** `deleteCookLog(userId,

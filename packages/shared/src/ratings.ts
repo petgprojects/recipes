@@ -39,6 +39,19 @@ export type CookLogCreate = z.infer<typeof cookLogCreateSchema>;
 /** `GET /api/ratings?recipeId=` and the `DELETE` route validate against this. */
 export const recipeIdQuerySchema = uuidSchema;
 
+/**
+ * `DELETE /api/ratings/:id` validates its **path** param against this.
+ *
+ * Not optional politeness: `cook_logs.id` is a `uuid` column, so an unvalidated
+ * path segment reaches Postgres as `where id = 'not-a-uuid'`, which raises
+ * `invalid input syntax for type uuid`. `withUser()` turns any throw into a 503
+ * — telling the client "the database is down, retry" about a request that can
+ * never succeed, and echoing the failed statement (and the signed-in user's id)
+ * back in the error body. `/api/recipes/:id` guards its path param for the same
+ * reason.
+ */
+export const cookLogIdSchema = uuidSchema;
+
 /** One logged cook, as the API and the client agree to shape it. */
 export interface CookLogEntry {
   id: string;

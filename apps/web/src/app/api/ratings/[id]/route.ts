@@ -9,7 +9,7 @@
  * and this responds exactly as it would for one already gone.
  */
 
-import { recipeIdQuerySchema } from '@recipes/shared/ratings';
+import { cookLogIdSchema, recipeIdQuerySchema } from '@recipes/shared/ratings';
 import { deleteCookLog } from '@/lib/ratings';
 import { badRequest, jsonOk, withUser } from '@/lib/planner-route';
 
@@ -19,8 +19,15 @@ export const revalidate = 0;
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
+  // Both are checked before anything reaches SQL: `cook_logs.id` and
+  // `cook_logs.recipe_id` are `uuid` columns, and a malformed value would
+  // otherwise surface as a 503 rather than the 400 it is. See
+  // `cookLogIdSchema` for why that particular wrong answer is worth avoiding.
+  const logId = cookLogIdSchema.safeParse(id);
+  if (!logId.success) return badRequest(`Invalid cook log id: ${id}`);
+
   const parsed = recipeIdQuerySchema.safeParse(new URL(request.url).searchParams.get('recipeId'));
   if (!parsed.success) return badRequest('Expected a `recipeId` query param.');
 
-  return withUser(async (user) => jsonOk(await deleteCookLog(user.id, id, parsed.data)));
+  return withUser(async (user) => jsonOk(await deleteCookLog(user.id, logId.data, parsed.data)));
 }

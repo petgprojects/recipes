@@ -9,7 +9,14 @@
 
 import { describe, expect, it } from 'vitest';
 import { RATING_ASPECTS } from '../src/vocab';
-import { MAX_NOTES_LENGTH, MAX_RATING, MIN_RATING, cookLogCreateSchema } from '../src/ratings';
+import {
+  MAX_NOTES_LENGTH,
+  MAX_RATING,
+  MIN_RATING,
+  cookLogCreateSchema,
+  cookLogIdSchema,
+  recipeIdQuerySchema,
+} from '../src/ratings';
 
 const SHEET_PAN = '11111111-1111-4111-8111-111111111111';
 
@@ -95,5 +102,30 @@ describe('cookLogCreateSchema', () => {
         notes: 'x'.repeat(MAX_NOTES_LENGTH + 1),
       }).success,
     ).toBe(false);
+  });
+});
+
+/**
+ * Both of these guard a value that is interpolated into a `uuid` column
+ * comparison. Skipping either turns a malformed request into
+ * `invalid input syntax for type uuid` — which `withUser()` reports as a 503
+ * ("the database is down, retry") for a request that can never succeed, with
+ * the failed statement echoed back to the caller.
+ */
+describe('uuid path and query guards', () => {
+  it('accepts a real uuid', () => {
+    expect(cookLogIdSchema.safeParse(SHEET_PAN).success).toBe(true);
+    expect(recipeIdQuerySchema.safeParse(SHEET_PAN).success).toBe(true);
+  });
+
+  it('rejects a malformed id before it can reach SQL', () => {
+    for (const bad of ['not-a-uuid', '', '../../etc/passwd', "' or 1=1 --"]) {
+      expect(cookLogIdSchema.safeParse(bad).success, bad).toBe(false);
+    }
+  });
+
+  it('rejects an absent query param', () => {
+    // `searchParams.get()` returns null, not undefined, when the key is missing.
+    expect(recipeIdQuerySchema.safeParse(null).success).toBe(false);
   });
 });

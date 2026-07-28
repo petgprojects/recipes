@@ -110,6 +110,19 @@ export function RatingForm({ recipeId, signedIn }: RatingFormProps) {
 
   const logs = query.data ?? [];
 
+  /**
+   * An unread history and an empty history must not look alike — the same rule
+   * `lib/planner-route.ts` states for 401 vs 503, and that the planner store
+   * follows for picks. Without this a session that quietly expired renders as
+   * "you have never cooked this", and the reader logs it a second time.
+   */
+  const readWarning =
+    query.isError && query.error instanceof ApiError && query.error.status === 401
+      ? 'Your session ended. Sign in again to see the cooks you have logged.'
+      : query.isError
+        ? "Couldn't load your past cooks. They're safe — this will retry."
+        : '';
+
   return (
     <div>
       <div className="mp-stars" role="radiogroup" aria-label="Rating">
@@ -117,10 +130,15 @@ export function RatingForm({ recipeId, signedIn }: RatingFormProps) {
           <button
             key={value}
             type="button"
+            role="radio"
             className="mp-star"
             data-on={value <= rating}
             aria-label={`${value} star${value === 1 ? '' : 's'}`}
-            aria-pressed={value <= rating}
+            // `aria-checked`, not `aria-pressed`: inside a radiogroup exactly
+            // one option is chosen. `value <= rating` is right for the *fill*
+            // (four lit stars for a 4) but would announce four separate
+            // selected radios.
+            aria-checked={value === rating}
             onClick={() => setRating(value)}
           >
             ★
@@ -150,7 +168,7 @@ export function RatingForm({ recipeId, signedIn }: RatingFormProps) {
         onChange={(event) => setNotes(event.target.value)}
       />
 
-      {warning !== '' && <p className="mp-note">{warning}</p>}
+      {(warning || readWarning) !== '' && <p className="mp-note">{warning || readWarning}</p>}
 
       <div className="mp-card-acts">
         <button className="mp-btn mp-btn-fill" disabled={submitting} onClick={submit}>

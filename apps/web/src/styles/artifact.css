@@ -481,3 +481,18 @@
   border-radius: 50%; background: var(--paper); transition: transform .14s;
 }
 .mp-switch[aria-checked="true"] .mp-switch-knob { transform: translateX(17px); }
+
+/* ---------------------------------------------------------------- *
+ *  Phase 7 step 3. Why this recipe is where it is in the feed.
+ *  Same argument as the rules panel above: a ranking you cannot see
+ *  the reasoning behind is one you cannot argue with. It reads as an
+ *  aside rather than as another blurb, because it is the app talking
+ *  about itself, not about the food.
+ * ---------------------------------------------------------------- */
+.mp-card-why {
+  display: flex; align-items: baseline; gap: 6px;
+  margin: 8px 0 0; padding: 7px 9px;
+  background: var(--leaf-soft); border-radius: 8px;
+  font-size: 12.5px; line-height: 1.45; color: var(--leaf);
+}
+.mp-card-why-mark { flex: 0 0 auto; font-size: 11px; }

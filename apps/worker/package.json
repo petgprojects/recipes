@@ -11,6 +11,7 @@
     "capture": "tsx scripts/capture-fixtures.ts",
     "coverage": "tsx scripts/coverage-report.ts",
     "repair:ingredients": "tsx scripts/repair-mismapped-ingredients.ts",
+    "personalize": "tsx scripts/run-personalization.ts",
     "test": "vitest run"
   },
   "dependencies": {

@@ -1,10 +1,11 @@
 # Session Handoff
 
-Current state and the next move. Written 2026-07-28, after Phase 7's
-deterministic half (steps 1 and 4) shipped and was verified live.
+Current state and the next move. Written 2026-07-28, after Phase 7 closed —
+the personalization loop runs end to end and was verified live against the real
+provider.
 
 This file is **not** a history — it holds only what still constrains the code.
-`PROGRESS.md` is the archive: every amendment (A1–A20), why each decision was
+`PROGRESS.md` is the archive: every amendment (A1–A21), why each decision was
 made, and a log entry per phase. Read that when you need the reasoning behind a
 rule here, or before reopening a settled decision. `AGENTS.md` has the
 repository map, commands and working rules.
@@ -13,69 +14,61 @@ repository map, commands and working rules.
 
 ## Start here
 
-### Phase 7, continued — steps 2 and 3, the model half
+**Phases 0 through 7 are complete.** There is no half-finished work and nothing
+carried over. The next move is a decision rather than a task, and it is Peter's:
 
-**Steps 1 and 4 are done and verified live** (see the 2026-07-28 entries in
-`PROGRESS.md`, and amendment A20 for the design). Hard rules are derived
-deterministically in SQL, applied as a `WHERE` clause on browse, and shown in a
-panel above the feed with a working per-rule switch. Peter chose to finish the
-deterministic half before spending anything on the model.
+| Option | What it is |
+| --- | --- |
+| **Phase 8, from PLAN.md's list** | Apple Sign In, nutrition estimates, meal-calendar assignment, pantry tracking, YouTube as a source |
+| **pgvector similarity** | PLAN.md §5 defers it deliberately: "add it later, as a *signal feeding into* the score, once there's enough history to justify it." The table exists. Today there are 0 `cook_logs`, so there is not enough history. |
+| **Reddit** | The adapter is production-wired with `enabled = false`. One boolean turns it on, and it needs credentials that reCAPTCHA has so far prevented creating. |
+| **Live use** | Nothing is blocking daily use. The loop needs 5 rated recipes per reader before it does anything. |
 
-What already exists, so you extend it rather than rebuild it:
+### How the nightly loop fits together
+
+Read this before changing any of it; the ordering is load-bearing.
+
+```
+cron (0 3 * * *) → scan job → [enrichment job] → personalization job
+```
+
+- **Personalization is last**, enqueued by the enrichment job on completion.
+  Scoring a recipe before Phase 2 has given it a category, tags and a blurb
+  would score it on a blank.
+- **Without `OPENROUTER_API_KEY` the scan job enqueues it instead**, and the
+  pass runs its free half only. Hard rules must be re-derived nightly whether or
+  not a provider is configured, or a filter outlives the ratings behind it.
+- **Per reader, in order:** hard rules (pure SQL, always) → profile (gated on
+  ≥5 distinct rated recipes) → scoring (needs the profile just written).
+- A reader-level failure is recorded and the pass moves on. A budget stop ends
+  the pass as an orderly `partial` — retrying it would meet the same UTC-day cap.
 
 | Thing | Where |
 | --- | --- |
-| Rule shape, thresholds, derivation decisions, display strings | `packages/shared/src/personalization.ts` (pure, no DB) |
-| Evidence gathering + nightly derivation | `apps/worker/src/personalization/hard-rules.ts` |
+| Rule/profile/score contracts, thresholds, all the judgement calls | `packages/shared/src/personalization.ts` (pure, no DB) |
+| The two prompts | `apps/worker/src/llm/taste-profile.ts`, `score-recipes.ts` |
+| Evidence gathering, history, candidate rows, persistence | `apps/worker/src/personalization/{hard-rules,profile,scoring}.ts` |
+| Per-reader and whole-pass orchestration | `apps/worker/src/personalization/runtime.ts` |
+| The queue and its wiring | `apps/worker/src/jobs/personalization-queue.ts`, `apps/worker/src/index.ts` |
 | Reading prefs, the `WHERE` fragment, the switch write | `apps/web/src/lib/preferences.ts` |
-| `GET`/`PATCH` rules | `apps/web/src/app/api/preferences/rules/route.ts` |
-| The visible panel | `apps/web/src/components/hard-rules.tsx` + `.mp-rules` in `artifact.css` |
+| The score join and the browse order | `apps/web/src/lib/recipes.ts` |
+| The rules panel, the reason on the card | `apps/web/src/components/{hard-rules,recipe-card}.tsx` |
 
-The split to keep: **SQL gathers, TypeScript decides** — same shape as A19's
-grocery split. Anything that is a judgement call belongs in the pure shared
-module where it can be tested without a database.
+**To run the pass by hand**, instead of waiting for a scan:
 
-Nothing schedules `deriveHardRulesForUser()` yet — it is written and tested but
-no cron or pg-boss job calls it. Wiring the nightly job is naturally step 2/3's
-work, since all three steps run on the same schedule (`apps/worker/src/jobs/`).
+```bash
+docker compose exec worker ./node_modules/.bin/tsx scripts/run-personalization.ts --user <uuid>
+docker compose exec worker ./node_modules/.bin/tsx scripts/run-personalization.ts --rules-only
+```
 
-What remains is the part that costs money:
+It spends real money without `--rules-only`. A full 235-recipe scoring pass for
+one reader is 12 provider calls and cost **$0.0093** measured; budget several
+minutes, since batches occasionally take 90–150 seconds each.
 
-1. **Step 2 — the soft profile.** Feed `cook_logs` (title, time, tags, rating,
-   aspects, notes) to OpenRouter and store a short prose profile in
-   `user_preferences.profile`. Follow `apps/worker/src/llm/suitability.ts`: a
-   direct, stateless structured-output call, no agent loop. The `profile`
-   column is deliberately untouched by both step-1 writers — check the
-   `onConflictDoUpdate` in `hard-rules.ts` and `preferences.ts` before adding a
-   third writer.
-2. **Step 3 — batched scoring.** Inject the profile into a batched prompt over
-   new recipes in the daily scan → `recipe_scores.score` plus a one-line
-   `reason` that must be **shown on the card**; PLAN.md is explicit that "an
-   opaque ranking is one you can't debug or trust."
-3. **The cold-start guard.** `MIN_RATED_RECIPES_FOR_SCORING` (5) exists in
-   `@recipes/shared/personalization` and is **not yet used by anything** —
-   step 3 is what enforces it. Below 5 rated recipes `recipe_scores` stays
-   empty and browse keeps its current sort, which is already the documented
-   cold-start order.
-4. **Score-aware ordering** in `listRecipes()`, above the existing
-   `published_at DESC` / source-rating tiebreak.
+### Signing in locally, to verify anything in a browser
 
-**Test data.** There are still **0 `cook_logs`**, so nothing in steps 2 or 3 is
-exercisable as-is. Peter's call: seed synthetic logs on a scratch user, drive
-both steps, then drop the user — `cook_logs` cascades, and both new integration
-suites already use exactly that pattern.
-
-**Nothing else is outstanding.** The Phase 5 grocery-tab browser check that
-headed this file for two sessions is closed — the signed-out list (merged in
-TypeScript) and the signed-in list (merged in SQL) render identically down to
-which lines the migrated check-offs land on, so amendment A19's key-agreement
-invariant is confirmed live and not only by the differential suite.
-
-### Signing in locally, to verify any of this in a browser
-
-Steps 2 and 3 need a signed-in reader, and Google's real OAuth flow is not
-something to automate. The established recipe, used for Phase 6 and again for
-Phase 7 step 4:
+Google's real OAuth flow is not something to automate. The established recipe,
+used for Phases 6 and 7:
 
 ```bash
 cp .env .env.backup                # byte-exact copy; .env.backup is gitignored
@@ -87,17 +80,21 @@ docker compose up -d web
 curl -s -o /dev/null -w '%{http_code}\n' localhost:3000/api/planner   # expect 401
 ```
 
-Restore from the copy rather than deleting the line by hand, and `diff` the two
-before you trust it — `.env` holds four live secrets and is the one file in this
-repo that cannot be reconstructed. Delete any probe rows you created on the way
-out (`user_preferences`, `cook_logs`, `saved_recipes`, `grocery_checks`); a
-scratch user is easiest, since every one of those cascades from `users`.
+Restore from the copy rather than deleting the line by hand — `.env` holds four
+live secrets and is the one file in this repo that cannot be reconstructed.
+Check it with `diff .env .env.backup > /dev/null; echo $?` rather than anything
+that prints the file: a diff of `.env` puts every secret in your transcript.
 
-Two things that cost time last session, both tooling and not the app: browser
-clicks dispatched before React finishes hydrating 235 cards land on the DOM and
-silently do nothing, so wait for hydration or drive the element directly; and
-screenshots come back scaled ~0.907× from the 1280px viewport, so coordinates
-read straight off a screenshot are the correct ones to pass back.
+Delete any probe rows you created on the way out (`user_preferences`,
+`cook_logs`, `recipe_scores`, `saved_recipes`, `grocery_checks`). Keep the
+`scan_runs` rows a personalization run opens — they record real spend and are
+what the daily budget reads.
+
+Two things that cost time, both tooling and not the app: browser clicks
+dispatched before React finishes hydrating land on the DOM and silently do
+nothing, so wait for hydration or drive the element directly; and screenshots
+come back scaled ~0.907× from the 1280px viewport, so coordinates read straight
+off a screenshot are the correct ones to pass back.
 
 ---
 
@@ -111,17 +108,16 @@ read straight off a screenshot are the correct ones to pass back.
   `saved_recipes`, **0** `grocery_checks`, **0** `cook_logs`, **0**
   `user_preferences`, **0** `recipe_scores` — every probe row from Phases 4
   through 7 was removed.
-- OpenRouter spend to date ≈ **$0.31**.
+- OpenRouter spend to date ≈ **$0.32**.
 
-Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **660
-passing** (shared 134, db 20, worker 473, web 33); four typechecks clean;
-production build clean, with `/api/preferences/rules` registered as a dynamic
-route; all four secrets absent from `apps/web/.next/static`; `/`, `/ops`,
-`/api/recipes`, `/api/recipes/:id`, `/api/images/:file`, `POST /api/grocery`,
-`GET/POST /api/ratings`, `DELETE /api/ratings/:id` and
+Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **712
+passing** (shared 152, db 20, worker 500, web 40); four typechecks clean;
+production build clean; all four secrets absent from `apps/web/.next/static`;
+`/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file`,
+`POST /api/grocery`, `GET/POST /api/ratings`, `DELETE /api/ratings/:id` and
 `GET/PATCH /api/preferences/rules` all respond correctly with the Compose stack
-up. Signed out, `/api/recipes` returns all 235 active recipes and
-`/api/preferences/rules` is a 401.
+up. Signed out, `/api/recipes` returns all 235 active recipes with every `score`
+null, and `/api/preferences/rules` is a 401.
 
 The production build needs `DATABASE_URL` in its environment — `/api/health`
 imports `@recipes/shared/env` at module scope, so `next build` fails at "collect
@@ -129,16 +125,68 @@ page data" without it. That is pre-existing and not a regression.
 
 Driven live in a browser, signed in through a temporary local
 `DEV_AUTH_FALLBACK=true` (reverted after; recipe above): the Phase 6 ratings
-flow, the Phase 5 grocery tab both signed in and signed out, and the Phase 7
-rules panel — two seeded rules took browse from 235 recipes to 173, and
-switching one off took it to 183 with the rule struck through and still
-listed.
+flow, the Phase 5 grocery tab both signed in and signed out, the Phase 7 rules
+panel, and the full Phase 7 loop — three derived rules took browse from 235 to
+74, in strict score order from 100 down to 10, every card carrying its reason.
 
 ---
 
 ## Invariants — these will bite you
 
 Each one has a plausible-looking wrong version, and most fail silently.
+
+### Personalization, the model half (A21)
+
+- **The model is never sent a recipe id.** Batches are numbered `ref: 1…20` and
+  `resolveScoreBatch()` maps them back locally. A mistyped UUID writes a score
+  against the wrong recipe and nothing anywhere would notice; a bad `ref` is
+  droppable. The response schema is built per batch, so its ceiling is that
+  batch's length.
+- **A short or duplicated response costs rows, never correctness.** Unknown refs
+  dropped, first answer per ref wins, scores clamped, missing refs left
+  unscored — which is a state the whole system already handles, and the next run
+  picks them up because "unscored" is durable in the table.
+- **An unscored recipe sorts as neutral, not last.** `coalesce(score, 50)`.
+  Nulls-last would bury every new arrival under the corpus; nulls-first would
+  put unranked rows above a 95. Signed out every row coalesces the same way, so
+  the browse order is exactly the pre-Phase-7 one — which is what keeps the
+  server render usable as `initialData`.
+- **A changed profile rescores the corpus**, because a score answers the
+  question the profile asked. Rows are overwritten in place, never deleted
+  first, so the ranking stays complete even if the run stops on budget.
+- **The cold-start floor counts distinct recipes rated, not cook logs**, and it
+  gates step 2 as well as step 3. One chili cooked five times is one data point.
+- **Three writers share `user_preferences`; each owns one column.** The rules
+  job owns `hard_rules`, the switch owns `enabled` inside it, the profile job
+  owns `profile`. Every `onConflictDoUpdate` lists only its own column plus
+  `updated_at` — a full-row upsert silently reverts whichever ran first.
+- **Scoring ignores hard rules on purpose.** It scores rows a rule currently
+  hides, because that switch can flip at any moment and a feed that came back
+  unranked the instant it did would look broken.
+- **The reason must be shown.** A score with no reason is dropped rather than
+  stored: PLAN.md, "an opaque ranking is one you can't debug or trust."
+
+### Hard rules (A20)
+
+- **Both `listRecipes()` callers must pass the same rules *and* the same
+  `userId`.** The server-rendered page is the client's `initialData`; a filter
+  or an ordering applied on one path and not the other is a hydration mismatch,
+  and it looks like the feed flickering rather than like a bug.
+- **`/api/recipes` resolves both from the session, never the query string.** A
+  filter or a ranking over your own feed must not be something a caller can
+  spoof or switch off by editing a URL.
+- **Every clause keeps a row whose column is null.** An unknown `total_minutes`
+  or `category` has not been disliked. Hiding it would let missing data act as
+  a preference.
+- **A rule change is not a "N new recipes" pill.** Un-hidden recipes are not new
+  arrivals, and saying so is a lie about where they came from. `adoptNextFeed`
+  in `planner.tsx` handles it, and the flag is set *before* the invalidate
+  because the refetch can resolve in the same tick.
+- **A disabled rule stays listed and stays in the column.** Removing it from the
+  UI would leave no way to switch it back on; dropping it from `hard_rules`
+  would let the nightly job silently re-arm the filter.
+- **`hard_rules` is parsed, not cast** (`parseHardRules()`). One malformed entry
+  costs its own filter, not the browse feed.
 
 ### Grocery list (A18, A19)
 
@@ -210,28 +258,6 @@ Each one has a plausible-looking wrong version, and most fail silently.
   `packages/shared/src/schemas.ts`, reused rather than redefined) is what turns
   that into a 400 before it reaches SQL.
 
-### Hard rules (A20)
-
-- **Both `listRecipes()` callers must pass the same rules.** The
-  server-rendered page is the client's `initialData`; a filter applied on one
-  path and not the other is a hydration mismatch, and it will look like the
-  feed flickering rather than like a bug in the filter.
-- **`/api/recipes` resolves rules from the session, never the query string.** A
-  filter over your own feed must not be something a caller can spoof or switch
-  off by editing a URL.
-- **Every clause keeps a row whose column is null.** An unknown `total_minutes`
-  or `category` has not been disliked. Hiding it would let missing data act as
-  a preference.
-- **A rule change is not a "N new recipes" pill.** Un-hidden recipes are not new
-  arrivals, and saying so is a lie about where they came from. `adoptNextFeed`
-  in `planner.tsx` handles it, and the flag is set *before* the invalidate
-  because the refetch can resolve in the same tick.
-- **A disabled rule stays listed and stays in the column.** Removing it from the
-  UI would leave no way to switch it back on; dropping it from `hard_rules`
-  would let the nightly job silently re-arm the filter.
-- **`hard_rules` is parsed, not cast** (`parseHardRules()`). One malformed entry
-  costs its own filter, not the browse feed.
-
 ### Auth and planner state (A15, A16, A17)
 
 - **`AUTH_URL` must stay pinned** in `docker-compose.yml`. The container binds
@@ -288,13 +314,22 @@ Each one has a plausible-looking wrong version, and most fail silently.
   page goes blank with `ENOENT … /.next/server/pages/_document.js`. Recover:
   `docker compose stop web && docker compose rm -f web && docker volume rm recipes_web-next && docker compose up -d web`.
   Use `-p <other-project>` if you really need one.
+- **The root `test` script runs packages one at a time on purpose**
+  (`--workspace-concurrency=1`). Worker integration suites insert a temporary
+  *active* recipe; web suites count active recipes. Run them concurrently and
+  the web suite fails by one against a corpus that changed under it. If you add
+  a suite that counts corpus rows, assert against what a call actually saw
+  rather than against a second query.
 - **Backticks inside a `` sql`…` `` template close the template literal.**
   esbuild's error points at the prose and says "Expected ; but found …".
+  Relatedly, `sql` expands a JS array into a *parameter list*, not an array
+  literal: a `text[]` value has to go in as `'{a,b}'`.
 - Database-backed tests need the Compose database **and** `DATABASE_URL`
-  exported — now including `apps/web`.
+  exported — worker and web both.
 - The worker bind-mounts the repo and runs `tsx watch`, so a source edit
-  restarts it and a bootstrap enrichment job runs on start. That is how to
-  trigger a re-map: repair the data, then `docker compose restart worker`.
+  restarts it, and a bootstrap enrichment job runs on start — which now also
+  enqueues a personalization pass. That is how to trigger a re-map: repair the
+  data, then `docker compose restart worker`.
 - `@recipes/shared/env` is server-only. Route handlers and `lib/*.ts` import it;
   nothing in `src/components` may. Client-facing types live in
   `src/lib/recipe-types.ts` and `@recipes/shared/planner` for exactly this
@@ -307,7 +342,8 @@ Each one has a plausible-looking wrong version, and most fail silently.
 
 - `OPENROUTER_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and
   `AUTH_SECRET` are all in the local `.env` and verified end to end. **Never
-  print or commit them.**
+  print or commit them** — and never `diff` or `cat` `.env` itself; compare with
+  `diff .env .env.backup > /dev/null; echo $?`.
 - The Google client's registered callback is
   `http://localhost:3000/api/auth/callback/google`. Changing the app's host or
   port means updating both that registration and `AUTH_URL`.

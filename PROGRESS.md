@@ -437,6 +437,69 @@ hiding from them. `Planner` therefore adopts the next feed directly through
 in the same tick. Without this, switching a filter off announces "10 new
 recipes", which is a lie about where they came from.
 
+### A21 — Scores are addressed by ref, missing ones are neutral, and a changed profile invalidates them
+*Phase 7.*
+
+Four decisions in the model half of the loop (PLAN.md §5 steps 2 and 3), each
+of which has a plausible-looking wrong version that fails silently.
+
+**1. The model never sees a recipe id.** A batch goes out numbered `ref: 1…20`
+and comes back the same way; `resolveScoreBatch()` maps refs to ids locally. A
+36-character UUID is exactly the token a model mistypes, and a mistyped id in a
+batch of twenty writes a score against the wrong recipe — invisible, and wrong
+in the direction personalization can least afford. A bad `ref` is droppable; a
+plausible-looking UUID is not. The response schema is built per batch, so its
+`ref` ceiling is that batch's length and an out-of-range ref is refused at the
+provider rather than dropped on the way back.
+
+The resolver is also the reason a short, long, duplicated or renumbered
+response costs rows and never correctness: unknown refs are dropped, a repeated
+ref keeps its first answer, scores are clamped, and a missing ref simply leaves
+that recipe unscored — a state the whole system already handles.
+
+**2. An unscored recipe sorts as neutral, not last.** `listRecipes()` orders by
+`coalesce(score, 50)`, not by `score desc nulls last`. Same principle as A20's
+null-keeping `WHERE` clauses: a recipe crawled this morning has no score
+because the nightly pass has not reached it, not because it is a bad match.
+Sorting it last would bury every new arrival under the whole corpus and make
+the "N new recipes" pill point at something nobody can find; sorting it first
+would put unranked rows above a 95. Signed out, every score is null, every row
+coalesces to the same number, and the browse order is byte-identical to what it
+was before Phase 7 touched the query — which is what keeps the server render
+usable as the client's `initialData`.
+
+**3. A changed profile rescores everything.** A score is an answer to the
+question the profile asked; when the profile text changes, the old scores are
+not stale-but-usable, they are answers to a different question.
+`deriveProfileForUser()` reports whether the stored text actually moved and the
+pass passes that through as `refreshAll`. Rows are overwritten in place and
+never deleted first, so a reader keeps a complete ranking throughout, including
+when the run stops on budget.
+
+Two consequences worth stating. Scoring deliberately **ignores hard rules** —
+it scores recipes a rule currently hides, because the reader can flip that
+switch at any moment and a feed that came back unranked the instant they did
+would look broken; the wasted spend is cents. And the cold-start floor
+(`MIN_RATED_RECIPES_FOR_SCORING`, 5) counts **distinct recipes rated**, not cook
+logs: someone who cooked one chili five times has told us one thing about
+themselves five times. The floor gates step 2 as well as step 3, because a
+profile nothing is allowed to score against is a provider call bought for
+nothing.
+
+**4. Three writers share `user_preferences`, and each owns one column.** The
+nightly rules job owns `hard_rules`, the reader's switch owns `enabled` inside
+it, and the profile job owns `profile`. Every `onConflictDoUpdate` in all three
+lists only its own column plus `updated_at`. A full-row upsert would silently
+revert whichever writer ran first, and the three run minutes apart.
+
+The reason line shown on the card is deliberately *not* PLAN.md's example
+sentence ("because you rated 4 other sheet-pan recipes 5★"). The scoring prompt
+is given the profile and the recipe's facts — not the cook history, which is
+what makes the call batchable and cheap — so it has no counts to cite, and
+asking for that phrasing would be asking it to invent them. The prompt requires
+a clause grounded in the profile instead, and forbids counts and star ratings
+outright.
+
 ### A3 — Source list resolved (PLAN.md §8, open question 11)
 Budget Bytes, Pinch of Yum, Downshiftology, GypsyPlate, Skinnytaste, The
 Kitchn, Love & Lemons, Serious Eats.
@@ -593,8 +656,24 @@ removes it structurally.
       the real database), four typechecks clean, production build clean, new
       routes `/api/ratings` and `/api/ratings/[id]` registered. `cook_logs` is
       back to 0 rows after the manual test.*
-- [ ] **Phase 7 — Personalization.** SQL-derived hard rules, LLM soft profile,
-      batched scoring with visible reasons, cold-start guards.
+- [x] **Phase 7 — Personalization.** ✅ **COMPLETE.**
+    - [x] Hard rules derived deterministically in SQL, applied as a `WHERE`
+          clause, shown in a panel with a per-rule switch (A20)
+    - [x] LLM soft profile in `user_preferences.profile`, behind the
+          distinct-rated-recipes cold-start floor
+    - [x] Batched scoring into `recipe_scores` with a one-line reason, refs
+          rather than ids, neutral ordering for unscored rows (A21)
+    - [x] Score-aware browse ordering above the existing cold-start sort, with
+          the reason rendered on the card
+    - [x] Nightly chain wired: scan → Phase 2 enrichment → personalization
+      *Exit verified live against real OpenRouter, on 12 synthetic cook logs
+      seeded on `dev@local` (6 quick recipes at 5★, 6 over 90 minutes at 1★):
+      three hard rules derived, a profile written that reads exactly like
+      PLAN.md's example, and all 235 active recipes scored in 12 batches with
+      no shortfall for $0.0093. Signed in, browse went 235 → 74 (the rules) in
+      strict score order, 100 down to 10, each card carrying its reason.
+      Signed out, 235 recipes and every score null. All probe rows deleted
+      afterwards.*
 
 ---
 
@@ -1134,3 +1213,87 @@ above the existing cold-start sort, and the `MIN_RATED_RECIPES_FOR_SCORING`
 guard — the constant exists and is unused until step 3. Peter's call on test
 data: seed synthetic `cook_logs` on a scratch user, drive both steps, then drop
 it.
+
+### 2026-07-28 (later) — Phase 7 steps 2 and 3: the model half, and the loop closes
+
+The half that costs money. Steps 1 and 4 shipped earlier the same day; this
+session is the soft profile, the batched scoring, the ordering that uses it,
+and the nightly job that finally runs all three. Amendment A21 records the
+design decisions; what follows is what was built and what the live run showed.
+
+**Step 2, the soft profile.** `apps/worker/src/llm/taste-profile.ts` is the
+prompt — one direct, stateless structured-output call, like every task since
+Phase 2 — and `apps/worker/src/personalization/profile.ts` is the SQL and the
+write. `loadCookHistory()` returns the 50 most recent cooks *plus* a count of
+distinct recipes rated over the whole history, because the display window must
+not be what answers the cold-start question. Below the floor the module makes
+**no provider call at all** and writes nothing.
+
+**Step 3, the scoring.** `score-recipes.ts` sends the profile and twenty
+recipes' browse-level facts, numbered `ref: 1…20`, and gets back
+`{ref, score, reason}`. `scoring.ts` loads the unscored rows newest-first,
+batches them, and upserts what `resolveScoreBatch()` can vouch for. Everything
+judgemental — the batch numbering, the ref resolution, the clamping, the
+cold-start predicate — lives in `@recipes/shared/personalization` and is tested
+without a database, the same split as A19 and A20.
+
+**The nightly chain.** Nothing scheduled `deriveHardRulesForUser()` before this
+session. Now `personalization-queue.ts` is a third pg-boss queue, and the
+enrichment job enqueues it on completion: scan → enrichment → personalization,
+in that order because scoring a recipe Phase 2 has not yet given a category,
+tags or a blurb would score it on a blank. Without an `OPENROUTER_API_KEY` the
+scan job enqueues it instead and the pass runs its free half only — rules must
+keep being re-derived nightly or a filter outlives the ratings behind it.
+`apps/worker/scripts/run-personalization.ts` (`personalize`) runs the same pass
+once, now, for one reader or all.
+
+**Verified live**, against the real provider. Twelve synthetic cook logs were
+seeded on `dev@local` — six recipes of 30 minutes or less at 5★ with
+`quick/tasty/would_repeat`, six over 90 minutes at 1★ with
+`slow/too_much_cleanup` — and `personalize --user` was run end to end:
+
+- **three hard rules** derived: `max_minutes:90`, `exclude_tag:Big batch`,
+  `exclude_tag:High protein` (the last two are what six slow recipes happen to
+  share; the derivation is only as good as its evidence, which is the point of
+  showing it);
+- **a profile** that reads exactly like PLAN.md's example — *"reliably dislikes
+  slow, messy projects … consistently love quick, 30-minute-or-less meals …"*;
+- **235 of 235 recipes scored** in 12 batches with no shortfall, 5 to 100, for
+  **$0.0093** total.
+
+Signed in through a temporary local `DEV_AUTH_FALLBACK=true`, browse showed
+**74** recipes (the rules) in strict score order from 100 down to 10, every card
+carrying its reason in a green aside under the blurb — "10 minutes and one pot,
+the ultimate quick weeknight winner." Signed out afterwards: 235 recipes, every
+`score` null, order unchanged.
+
+**One prompt line was relaxed after reading the output.** The profile prompt
+said "do not quote or restate individual recipes, ratings, or notes", and the
+model restated ratings anyway — accurately and readably. The ban on naming
+individual recipes it *did* follow. An instruction nobody follows is noise, so
+the line now forbids only what is actually enforced.
+
+**One flake, pre-existing, now fixed.** `corepack pnpm test` ran the workspace
+packages concurrently, and `apps/worker/test/recipes-storage.integration.test.ts`
+inserts a temporary **active** recipe while the web suites count active
+recipes — so the web suite failed with an off-by-one against a corpus that
+changed under it. It was always a race; the new suites shifted the timing
+enough to make it show. The root `test` script now passes
+`--workspace-concurrency=1`. The two new integration suites were also written
+to assert against what a call actually saw rather than against a second query.
+
+**Cleanup.** `.env` restored from a byte-identical backup, the web container
+recreated, `GET /api/planner` and `GET /api/preferences/rules` both back to
+401. All probe rows deleted: 0 `cook_logs`, 0 `user_preferences`, 0
+`recipe_scores`, 2 users. The `scan_runs` rows from the pass were kept — they
+record real spend and belong in the budget history.
+
+**Verification.** `corepack pnpm test` with `DATABASE_URL` — **712 passing**
+(shared 152, db 20, worker 500, web 40); four typechecks clean; production
+build clean; all four secrets absent from `apps/web/.next/static`;
+`/api/health` healthy with 425 recipes; `/`, `/ops`, `/api/recipes` all 200.
+OpenRouter spend to date ≈ **$0.32**.
+
+**Phase 7 is complete.** What is left is Phase 8's optional list, plus the
+pgvector similarity signal PLAN.md defers until there is enough history to
+justify it — the table is already there.

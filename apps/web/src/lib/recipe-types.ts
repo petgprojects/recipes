@@ -41,6 +41,18 @@ export interface RecipeSummary {
   publishedAt: string | null;
   firstSeenAt: string;
   lastSeenAt: string;
+  /**
+   * The reader's Phase 7 taste score, or `null` when nothing has scored this
+   * recipe for them — signed out, before the cold-start floor, or a recipe that
+   * arrived since the last nightly pass. Null is not zero: it sorts as
+   * `NEUTRAL_SCORE`, because an unscored recipe is unknown rather than bad.
+   */
+  score: number | null;
+  /**
+   * Why that score, in one line, shown on the card. PLAN.md §5: "an opaque
+   * ranking is one you can't debug or trust."
+   */
+  scoreReason: string | null;
 }
 
 export interface RecipeIngredientLine {

@@ -7,3 +7,5 @@ export * from './blurb';
 export * from './extract-recipe';
 export * from './extract-recipe-from-post';
 export * from './map-ingredients';
+export * from './taste-profile';
+export * from './score-recipes';

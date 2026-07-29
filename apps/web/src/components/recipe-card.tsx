@@ -10,6 +10,11 @@
  *   - an optional source rating — 9 of 21 probed pages published none and The
  *     Kitchn never does (PROGRESS.md, Phase 1), so it is a line that appears
  *     rather than a line that is sometimes empty.
+ *
+ * Phase 7 adds a fourth: the reason this recipe is where it is in the feed.
+ * PLAN.md §5 requires it — "an opaque ranking is one you can't debug or trust"
+ * — so the line appears whenever a score moved this card, and the ranking is
+ * never silent about itself.
  */
 
 import { fmtKeeps, fmtRating, fmtTime } from '@recipes/shared/format';
@@ -53,6 +58,15 @@ export function RecipeCard({ recipe, saved, priority, onToggleSave, onOpen }: Re
       </div>
 
       {recipe.blurb !== null && <p className="mp-card-blurb">{recipe.blurb}</p>}
+
+      {recipe.scoreReason !== null && (
+        <p className="mp-card-why">
+          <span className="mp-card-why-mark" aria-hidden="true">
+            ★
+          </span>
+          {recipe.scoreReason}
+        </p>
+      )}
 
       <div className="mp-meta">
         {time !== '' && <span>{time}</span>}

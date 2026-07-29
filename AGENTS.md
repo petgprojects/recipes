@@ -13,16 +13,15 @@ Do not restart completed phases or re-research facts already recorded there.
 
 ## Current checkpoint
 
-- Phase 0 through Phase 6 are complete. **Phase 7 is in progress**: its
-  deterministic half — hard rules derived in SQL, applied as a `WHERE` clause,
-  and shown in a panel with a per-rule switch — is done and verified live
-  (amendment A20).
-- Resume at **Phase 7 steps 2 and 3**: the LLM soft profile in
-  `user_preferences.profile`, and batched recipe scoring into `recipe_scores`
-  with a visible one-line reason, behind the cold-start guard
-  (`MIN_RATED_RECIPES_FOR_SCORING`, which nothing enforces yet). There are 0
-  `cook_logs`, so seed synthetic ones on a scratch user and drop it after. See
-  `HANDOFF.md` for the brief.
+- **Phase 0 through Phase 7 are complete.** Nothing is half-finished; the next
+  move is Peter's choice from `HANDOFF.md`'s options table.
+- The Phase 7 loop runs nightly as scan → Phase 2 enrichment → personalization,
+  and per reader as hard rules (pure SQL, always) → soft profile → batched
+  scoring. Rules are a `WHERE` clause with a visible per-rule switch (A20);
+  scores order browse and carry a one-line reason onto the card (A21). Both
+  halves are gated on ≥5 *distinct rated recipes*. Run the pass by hand with
+  `apps/worker/scripts/run-personalization.ts` — it spends real money unless
+  given `--rules-only`.
 - Phase 6 (ratings) shipped `@recipes/shared/ratings`, `apps/web/src/lib/ratings.ts`,
   `GET/POST /api/ratings` + `DELETE /api/ratings/:id`, and a "Rate it" section in
   the detail sheet — star picker, aspect chips, notes, history, remove. Rating
@@ -149,10 +148,11 @@ second instance is genuinely needed.
 
 ## Verification baseline
 
-At the Phase 5 checkpoint:
+At the Phase 7 checkpoint:
 
-- `corepack pnpm test` (with `DATABASE_URL`) — 582 passing (shared 95, db 20,
-  worker 461, web 8).
+- `corepack pnpm test` (with `DATABASE_URL`) — 712 passing (shared 152, db 20,
+  worker 500, web 40). The root script runs packages one at a time on purpose;
+  see `HANDOFF.md`.
 - `corepack pnpm typecheck` — clean across all workspaces.
 - Production Next.js build — passing.
 - `/api/health` — healthy with 425 recipes.

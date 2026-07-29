@@ -15,9 +15,21 @@
  * payload small enough to poll.
  */
 
-import { and, db, desc, eq, gt, ingredients, recipeIngredients, recipes, sources, sql } from '@recipes/db';
+import {
+  and,
+  db,
+  desc,
+  eq,
+  gt,
+  ingredients,
+  recipeIngredients,
+  recipeScores,
+  recipes,
+  sources,
+  sql,
+} from '@recipes/db';
 import { RECIPE_STATUS, type RecipeStatus } from '@recipes/shared';
-import type { HardRule } from '@recipes/shared/personalization';
+import { NEUTRAL_SCORE, type HardRule } from '@recipes/shared/personalization';
 import { hardRuleFilter } from './preferences';
 import type { RecipeDetail, RecipeSummary } from './recipe-types';
 
@@ -47,6 +59,13 @@ export interface ListRecipesOptions {
    * is a hydration mismatch.
    */
   hardRules?: HardRule[];
+  /**
+   * Whose `recipe_scores` to read, or `null` signed out. Same rule as
+   * `hardRules`: both callers must pass the same one, because a feed ordered by
+   * one reader's scores on the server and nobody's on the client is a
+   * hydration mismatch that presents as the feed reshuffling on load.
+   */
+  userId?: string | null;
 }
 
 const summaryColumns = {
@@ -74,7 +93,37 @@ const summaryColumns = {
   publishedAt: recipes.publishedAt,
   firstSeenAt: recipes.firstSeenAt,
   lastSeenAt: recipes.lastSeenAt,
+  score: recipeScores.score,
+  scoreReason: recipeScores.reason,
 } as const;
+
+/**
+ * The join onto the reader's scores.
+ *
+ * Signed out there is nobody to join against, and the condition is a literal
+ * false rather than a skipped join: the two paths must produce the same column
+ * list, or the server render and the polled JSON stop being the same shape and
+ * `initialData` is no longer safe. Postgres discards a `false` join condition,
+ * so this costs nothing.
+ */
+function scoreJoin(userId: string | null | undefined) {
+  return userId === null || userId === undefined
+    ? sql`false`
+    : and(eq(recipeScores.recipeId, recipes.id), eq(recipeScores.userId, userId));
+}
+
+/**
+ * Score first, then the cold-start order underneath it.
+ *
+ * `coalesce` to {@link NEUTRAL_SCORE} rather than nulls-last: a recipe crawled
+ * this morning has no score because the nightly pass has not seen it yet, not
+ * because it is a bad match, and burying every new arrival under 235 scored
+ * ones would make the "N new recipes" pill point at nothing. Signed out — and
+ * for any reader below the cold-start floor — every score is null, every row
+ * coalesces to the same number, and the order is exactly what it was before
+ * Phase 7 touched this query.
+ */
+const scoreOrder = desc(sql`coalesce(${recipeScores.score}, ${NEUTRAL_SCORE}::real)`);
 
 /** The database-side shape of {@link summaryColumns}: timestamps still Dates. */
 type SummaryRow = Omit<RecipeSummary, 'publishedAt' | 'firstSeenAt' | 'lastSeenAt' | 'tags'> & {
@@ -115,6 +164,7 @@ export async function listRecipes(options: ListRecipesOptions = {}): Promise<Rec
     .select(summaryColumns)
     .from(recipes)
     .innerJoin(sources, eq(sources.id, recipes.sourceId))
+    .leftJoin(recipeScores, scoreJoin(options.userId))
     .where(
       and(
         status === null ? undefined : eq(recipes.status, status),
@@ -123,6 +173,7 @@ export async function listRecipes(options: ListRecipesOptions = {}): Promise<Rec
       ),
     )
     .orderBy(
+      scoreOrder,
       desc(sql`coalesce(${recipes.publishedAt}, ${recipes.firstSeenAt})`),
       desc(sql`coalesce(${recipes.sourceRating}, 0)`),
       desc(recipes.id),
@@ -135,7 +186,7 @@ export async function listRecipes(options: ListRecipesOptions = {}): Promise<Rec
 /** One recipe with its steps and ingredient lines, or `null` if there is none. */
 export async function getRecipeDetail(
   id: string,
-  options: { status?: RecipeStatus | null } = {},
+  options: { status?: RecipeStatus | null; userId?: string | null } = {},
 ): Promise<RecipeDetail | null> {
   const status = options.status === undefined ? 'active' : options.status;
 
@@ -143,6 +194,9 @@ export async function getRecipeDetail(
     .select({ ...summaryColumns, instructions: recipes.instructions })
     .from(recipes)
     .innerJoin(sources, eq(sources.id, recipes.sourceId))
+    // Joined here too, so a detail row is the same shape as the summary it was
+    // opened from rather than a summary with two fields quietly nulled.
+    .leftJoin(recipeScores, scoreJoin(options.userId))
     .where(and(eq(recipes.id, id), status === null ? undefined : eq(recipes.status, status)))
     .limit(1);
 

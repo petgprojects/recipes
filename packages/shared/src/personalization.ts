@@ -255,6 +255,188 @@ export function mergeHardRules(previous: HardRule[], derived: HardRule[]): HardR
   return [...refreshed, ...retained].sort((a, b) => a.id.localeCompare(b.id));
 }
 
+// ── The soft profile (step 2) ───────────────────────────────────────────────
+
+/**
+ * How many of the reader's most recent cooks are fed to the profile prompt.
+ *
+ * Bounded for the ordinary reason — a prompt has to have a size — but also
+ * because a profile should describe who someone is *now*. Fifty cooks is more
+ * than a year of weekly meal prep; a rating from before that is history, not
+ * taste.
+ */
+export const PROFILE_HISTORY_LIMIT = 50;
+
+/**
+ * The profile is prose a person reads, not a document. PLAN.md's example is
+ * one sentence — "Prefers one-pot and sheet-pan; dislikes anything needing
+ * day-of assembly; rates spicy food highly" — and this cap is what keeps the
+ * model from writing an essay that then has to be re-sent with every batch of
+ * the step-3 scoring prompt.
+ */
+export const MAX_PROFILE_CHARS = 600;
+
+/** `deriveTasteProfile()` — the whole of step 2's provider contract. */
+export const tasteProfileSchema = z.object({
+  profile: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MAX_PROFILE_CHARS)
+    .describe("A short prose description of this cook's taste, in the third person."),
+});
+
+export type TasteProfile = z.infer<typeof tasteProfileSchema>;
+
+/**
+ * Whether the loop may run for a reader at all (PLAN.md §5's cold start).
+ *
+ * Counted in **distinct recipes rated**, not cook logs: someone who cooked one
+ * chili five times has one data point about their taste repeated five times,
+ * and a profile written off that would be confidently wrong. The same count
+ * gates step 2 as gates step 3 — a profile nothing is allowed to score against
+ * is a provider call bought for nothing.
+ */
+export function hasEnoughHistoryForScoring(distinctRatedRecipes: number): boolean {
+  return distinctRatedRecipes >= MIN_RATED_RECIPES_FOR_SCORING;
+}
+
+// ── Scoring (step 3) ────────────────────────────────────────────────────────
+
+/**
+ * Recipes per scoring request. Twenty for the same reason the ingredient
+ * backfill settled on twenty (PROGRESS.md, Phase 2): forty-item batches reached
+ * the model's output cap, and a batch that overflows turns a cheap call into a
+ * repair.
+ */
+export const SCORE_BATCH_SIZE = 20;
+
+export const MIN_SCORE = 0;
+export const MAX_SCORE = 100;
+
+/**
+ * What an unscored recipe sorts as.
+ *
+ * The same principle as A20's `WHERE` clauses: **missing data must not act as a
+ * preference**. A recipe crawled this morning has no score because nothing has
+ * looked at it yet, not because it is a bad match — sorting it last would hide
+ * every new arrival until the nightly job caught up, and sorting it first would
+ * put unranked rows above a 95. Neutral leaves it where its recency puts it.
+ */
+export const NEUTRAL_SCORE = 50;
+
+/** One line under the title on a card. Long enough to say why, short enough to read. */
+export const MAX_SCORE_REASON_CHARS = 140;
+
+/**
+ * The model addresses recipes by a small integer, never by their UUID.
+ *
+ * Not a stylistic choice: a 36-character hex id is exactly the kind of token
+ * a model silently mistypes, and a mistyped id in a batch of twenty is a score
+ * written against the wrong recipe — invisible, and wrong in the one direction
+ * personalization can least afford. A `ref` that does not match the batch is
+ * droppable; a plausible-looking UUID is not.
+ */
+export const recipeScoreSchema = z.object({
+  ref: z
+    .number()
+    .int()
+    .min(1)
+    .max(SCORE_BATCH_SIZE)
+    .describe('The ref number of the recipe being scored, copied from the input.'),
+  score: z
+    .number()
+    .min(MIN_SCORE)
+    .max(MAX_SCORE)
+    .describe('0–100. How well this recipe matches the profile.'),
+  reason: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MAX_SCORE_REASON_CHARS)
+    .describe('One short clause naming the evidence, shown to the reader.'),
+});
+
+export const recipeScoreBatchSchema = z.object({
+  scores: z.array(recipeScoreSchema).max(SCORE_BATCH_SIZE),
+});
+
+export type RecipeScoreResponse = z.infer<typeof recipeScoreSchema>;
+export type RecipeScoreBatch = z.infer<typeof recipeScoreBatchSchema>;
+
+/** A recipe as it goes into a batch: our id, and the ref the model will see. */
+export interface ScoreBatchEntry {
+  ref: number;
+  recipeId: string;
+}
+
+/** A score as it goes into `recipe_scores`. */
+export interface ResolvedRecipeScore {
+  recipeId: string;
+  score: number;
+  reason: string;
+}
+
+/** Split the work into prompt-sized batches, numbering each entry from 1. */
+export function batchForScoring<T>(
+  items: readonly T[],
+  size = SCORE_BATCH_SIZE,
+): { ref: number; item: T }[][] {
+  if (!Number.isInteger(size) || size < 1) {
+    throw new TypeError('scoring batch size must be a positive integer');
+  }
+  const batches: { ref: number; item: T }[][] = [];
+  for (let start = 0; start < items.length; start += size) {
+    batches.push(
+      items.slice(start, start + size).map((item, index) => ({ ref: index + 1, item })),
+    );
+  }
+  return batches;
+}
+
+function clamp(value: number, low: number, high: number): number {
+  return Math.min(Math.max(value, low), high);
+}
+
+/**
+ * Turn one batch's response back into rows, keeping only what can be trusted.
+ *
+ * A batched prompt can come back short, long, duplicated or renumbered, and
+ * none of those should cost the whole batch. A ref that is not in this batch is
+ * dropped — it addresses a recipe the model was not shown, so there is no
+ * defensible row to write. A repeated ref keeps its first answer, because the
+ * alternative is letting the tail of a response overwrite its own head. Scores
+ * are clamped rather than rejected: the schema already bounds them at the
+ * provider, so this is the belt to that braces.
+ *
+ * Missing refs are simply not returned. An unscored recipe is a well-defined
+ * state everywhere downstream — it sorts as {@link NEUTRAL_SCORE} — so a short
+ * response degrades into "fewer recipes scored", never into a wrong score.
+ */
+export function resolveScoreBatch(
+  batch: readonly ScoreBatchEntry[],
+  response: readonly RecipeScoreResponse[],
+): ResolvedRecipeScore[] {
+  const byRef = new Map(batch.map((entry) => [entry.ref, entry.recipeId]));
+  const seen = new Set<string>();
+  const resolved: ResolvedRecipeScore[] = [];
+
+  for (const scored of response) {
+    const recipeId = byRef.get(scored.ref);
+    if (recipeId === undefined || seen.has(recipeId)) continue;
+    const reason = scored.reason.trim();
+    if (reason === '') continue;
+    seen.add(recipeId);
+    resolved.push({
+      recipeId,
+      score: clamp(scored.score, MIN_SCORE, MAX_SCORE),
+      reason: reason.slice(0, MAX_SCORE_REASON_CHARS),
+    });
+  }
+
+  return resolved;
+}
+
 // ── Display ─────────────────────────────────────────────────────────────────
 
 /**

@@ -94,8 +94,9 @@ export async function GET(request: Request) {
     // be something a caller can spoof or turn off by editing a URL. The
     // server-rendered page resolves them the same way — a difference between
     // the two would be a hydration mismatch.
-    const { rules } = await getUserPreferences((await getCurrentUser())?.id ?? null);
-    const rows = await listRecipes({ ...options, hardRules: rules });
+    const userId = (await getCurrentUser())?.id ?? null;
+    const { rules } = await getUserPreferences(userId);
+    const rows = await listRecipes({ ...options, hardRules: rules, userId });
     return NextResponse.json(rows, { headers: { 'cache-control': 'no-store' } });
   } catch (error: unknown) {
     // Same reasoning as /api/health: do not answer 200 with an empty array when

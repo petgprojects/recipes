@@ -52,7 +52,7 @@ export default async function Home() {
     hardRules = preferences.rules;
 
     const [rows, saved] = await Promise.all([
-      listRecipes({ limit: BROWSE_LIMIT, hardRules }),
+      listRecipes({ limit: BROWSE_LIMIT, hardRules, userId: user?.id ?? null }),
       user === null ? Promise.resolve(undefined) : readPlannerState(user.id),
     ]);
     recipes = rows;

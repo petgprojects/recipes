@@ -10,18 +10,29 @@
 import { describe, expect, it } from 'vitest';
 import {
   DISLIKE_MEDIAN_AT_OR_BELOW,
+  MAX_SCORE,
+  MAX_SCORE_REASON_CHARS,
   MIN_OBSERVATIONS_PER_RULE,
+  MIN_RATED_RECIPES_FOR_SCORING,
+  SCORE_BATCH_SIZE,
   TIME_RULE_THRESHOLDS,
   activeHardRules,
+  batchForScoring,
   deriveExclusionRules,
   deriveTimeRule,
   describeHardRule,
   explainHardRule,
+  hasEnoughHistoryForScoring,
   median,
   mergeHardRules,
   parseHardRules,
+  recipeScoreBatchSchema,
+  resolveScoreBatch,
+  tasteProfileSchema,
   type HardRule,
+  type RecipeScoreResponse,
   type RuleObservation,
+  type ScoreBatchEntry,
 } from '../src/personalization';
 
 /** `n` ratings all of `value` — enough to clear the observation floor. */
@@ -222,6 +233,129 @@ describe('activeHardRules', () => {
       { id: 'b', kind: 'exclude_tag', value: 'b', enabled: false, observations: 5, medianRating: 2 },
     ];
     expect(activeHardRules(rules).map((r) => r.id)).toEqual(['a']);
+  });
+});
+
+describe('hasEnoughHistoryForScoring', () => {
+  it('is false one rating short of the floor and true at it', () => {
+    expect(hasEnoughHistoryForScoring(MIN_RATED_RECIPES_FOR_SCORING - 1)).toBe(false);
+    expect(hasEnoughHistoryForScoring(MIN_RATED_RECIPES_FOR_SCORING)).toBe(true);
+  });
+
+  it('is false for a reader who has rated nothing', () => {
+    expect(hasEnoughHistoryForScoring(0)).toBe(false);
+  });
+});
+
+describe('tasteProfileSchema', () => {
+  it('accepts a short prose profile and trims it', () => {
+    const parsed = tasteProfileSchema.parse({ profile: '  Prefers sheet-pan dinners.  ' });
+    expect(parsed.profile).toBe('Prefers sheet-pan dinners.');
+  });
+
+  it('rejects an empty profile rather than storing a blank one', () => {
+    // `getUserPreferences()` reads a blank profile as "no profile", so letting
+    // one through would look like the job had never run.
+    expect(tasteProfileSchema.safeParse({ profile: '   ' }).success).toBe(false);
+  });
+
+  it('rejects an essay', () => {
+    expect(tasteProfileSchema.safeParse({ profile: 'x'.repeat(5_000) }).success).toBe(false);
+  });
+});
+
+describe('batchForScoring', () => {
+  it('numbers each batch from 1, not from the position in the whole list', () => {
+    const batches = batchForScoring(['a', 'b', 'c', 'd'], 2);
+    expect(batches.map((batch) => batch.map((entry) => entry.ref))).toEqual([
+      [1, 2],
+      [1, 2],
+    ]);
+    expect(batches[1]?.map((entry) => entry.item)).toEqual(['c', 'd']);
+  });
+
+  it('returns no batches for nothing to score', () => {
+    expect(batchForScoring([])).toEqual([]);
+  });
+
+  it('never exceeds the schema-enforced ref ceiling at the default size', () => {
+    const items = Array.from({ length: SCORE_BATCH_SIZE * 3 + 1 }, (_, i) => i);
+    for (const batch of batchForScoring(items)) {
+      expect(batch.length).toBeLessThanOrEqual(SCORE_BATCH_SIZE);
+      expect(batch.at(-1)!.ref).toBeLessThanOrEqual(SCORE_BATCH_SIZE);
+    }
+  });
+
+  it('refuses a nonsense batch size instead of looping forever', () => {
+    expect(() => batchForScoring([1, 2], 0)).toThrow(TypeError);
+  });
+});
+
+describe('resolveScoreBatch', () => {
+  const batch: ScoreBatchEntry[] = [
+    { ref: 1, recipeId: 'recipe-one' },
+    { ref: 2, recipeId: 'recipe-two' },
+  ];
+
+  const scored = (ref: number, score: number, reason = 'because'): RecipeScoreResponse => ({
+    ref,
+    score,
+    reason,
+  });
+
+  it('maps refs back to recipe ids', () => {
+    expect(resolveScoreBatch(batch, [scored(2, 80), scored(1, 10)])).toEqual([
+      { recipeId: 'recipe-two', score: 80, reason: 'because' },
+      { recipeId: 'recipe-one', score: 10, reason: 'because' },
+    ]);
+  });
+
+  it('drops a ref that was not in this batch', () => {
+    // It addresses a recipe the model was never shown, so there is no row that
+    // could honestly be written for it.
+    expect(resolveScoreBatch(batch, [scored(7, 90)])).toEqual([]);
+  });
+
+  it('keeps the first answer when a ref is repeated', () => {
+    const resolved = resolveScoreBatch(batch, [scored(1, 90), scored(1, 10)]);
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0]?.score).toBe(90);
+  });
+
+  it('clamps a score outside the range instead of discarding the row', () => {
+    expect(resolveScoreBatch(batch, [scored(1, 999)])[0]?.score).toBe(MAX_SCORE);
+    expect(resolveScoreBatch(batch, [scored(1, -20)])[0]?.score).toBe(0);
+  });
+
+  it('drops a row whose reason is blank', () => {
+    // An unexplained score is exactly the opaque ranking PLAN.md forbids.
+    expect(resolveScoreBatch(batch, [scored(1, 80, '   ')])).toEqual([]);
+  });
+
+  it('truncates a reason too long for the card', () => {
+    const long = 'a'.repeat(MAX_SCORE_REASON_CHARS + 50);
+    expect(resolveScoreBatch(batch, [scored(1, 80, long)])[0]?.reason).toHaveLength(
+      MAX_SCORE_REASON_CHARS,
+    );
+  });
+
+  it('returns fewer rows for a short response rather than inventing them', () => {
+    expect(resolveScoreBatch(batch, [scored(1, 50)]).map((r) => r.recipeId)).toEqual([
+      'recipe-one',
+    ]);
+  });
+});
+
+describe('recipeScoreBatchSchema', () => {
+  it('accepts an empty batch — "nothing scorable here" is an answer', () => {
+    expect(recipeScoreBatchSchema.parse({ scores: [] }).scores).toEqual([]);
+  });
+
+  it('rejects a ref outside the batch numbering', () => {
+    const result = recipeScoreBatchSchema.safeParse({
+      scores: [{ ref: SCORE_BATCH_SIZE + 1, score: 50, reason: 'x' }],
+    });
+    expect(result.success).toBe(false);
   });
 });
 

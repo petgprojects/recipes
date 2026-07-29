@@ -9,6 +9,9 @@ out/
 .env
 .env.local
 .env.*.local
+# The DEV_AUTH_FALLBACK round-trip in HANDOFF.md parks a copy of .env here
+# while the web container is recreated. It holds the same live secrets.
+.env.backup
 
 .DS_Store
 *.log

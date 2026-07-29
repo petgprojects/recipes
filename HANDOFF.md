@@ -1,10 +1,10 @@
 # Session Handoff
 
-Current state and the next move. Written 2026-07-28 after the verified Phase 6
-exit.
+Current state and the next move. Written 2026-07-28, after Phase 7's
+deterministic half (steps 1 and 4) shipped and was verified live.
 
 This file is **not** a history — it holds only what still constrains the code.
-`PROGRESS.md` is the archive: every amendment (A1–A19), why each decision was
+`PROGRESS.md` is the archive: every amendment (A1–A20), why each decision was
 made, and a log entry per phase. Read that when you need the reasoning behind a
 rule here, or before reopening a settled decision. `AGENTS.md` has the
 repository map, commands and working rules.
@@ -20,6 +20,24 @@ repository map, commands and working rules.
 deterministically in SQL, applied as a `WHERE` clause on browse, and shown in a
 panel above the feed with a working per-rule switch. Peter chose to finish the
 deterministic half before spending anything on the model.
+
+What already exists, so you extend it rather than rebuild it:
+
+| Thing | Where |
+| --- | --- |
+| Rule shape, thresholds, derivation decisions, display strings | `packages/shared/src/personalization.ts` (pure, no DB) |
+| Evidence gathering + nightly derivation | `apps/worker/src/personalization/hard-rules.ts` |
+| Reading prefs, the `WHERE` fragment, the switch write | `apps/web/src/lib/preferences.ts` |
+| `GET`/`PATCH` rules | `apps/web/src/app/api/preferences/rules/route.ts` |
+| The visible panel | `apps/web/src/components/hard-rules.tsx` + `.mp-rules` in `artifact.css` |
+
+The split to keep: **SQL gathers, TypeScript decides** — same shape as A19's
+grocery split. Anything that is a judgement call belongs in the pure shared
+module where it can be tested without a database.
+
+Nothing schedules `deriveHardRulesForUser()` yet — it is written and tested but
+no cron or pg-boss job calls it. Wiring the nightly job is naturally step 2/3's
+work, since all three steps run on the same schedule (`apps/worker/src/jobs/`).
 
 What remains is the part that costs money:
 
@@ -47,30 +65,39 @@ exercisable as-is. Peter's call: seed synthetic logs on a scratch user, drive
 both steps, then drop the user — `cook_logs` cascades, and both new integration
 suites already use exactly that pattern.
 
-**A note on the grocery check**, now closed: the signed-out list (merged in
+**Nothing else is outstanding.** The Phase 5 grocery-tab browser check that
+headed this file for two sessions is closed — the signed-out list (merged in
 TypeScript) and the signed-in list (merged in SQL) render identically down to
 which lines the migrated check-offs land on, so amendment A19's key-agreement
 invariant is confirmed live and not only by the differential suite.
 
-PLAN.md §5: nightly, per user — (1) derive hard rules deterministically in SQL
-(`median(rating) WHERE total_minutes > 60` etc. → `user_preferences.hard_rules`,
-applied as a SQL filter, not a prompt), (2) derive a short prose soft profile
-with an LLM call over the rating history → `user_preferences.profile`, (3) score
-new recipes in the daily scan with a batched prompt → `recipe_scores.score` plus
-a one-line human-readable `reason`. **Cold start:** scoring only runs once a
-user has ≥5 rated recipes; below that `recipe_scores` stays empty and browse
-sorts by `published_at DESC` with source rating as a tiebreak. Hard rules need
-≥5 observations *in the relevant bucket* before they're emitted. Show active
-rules in the UI with a switch to disable each — PLAN.md is explicit that "a
-filter you can't see is indistinguishable from a bug."
+### Signing in locally, to verify any of this in a browser
 
-`user_preferences` and `recipe_scores` already exist in the schema, unused
-until now. `cook_logs` is what Phase 7 reads from — Phase 6 (see below) is what
-populates it, and there are 0 rows in it right now (the manual test data was
-removed), so Phase 7's cold-start path is the only one exercisable until real
-ratings accumulate. Consider seeding a handful of synthetic `cook_logs` rows for
-development, and delete them before calling the phase done, the same way the
-Phase 4/5 probe rows were removed.
+Steps 2 and 3 need a signed-in reader, and Google's real OAuth flow is not
+something to automate. The established recipe, used for Phase 6 and again for
+Phase 7 step 4:
+
+```bash
+cp .env .env.backup                # byte-exact copy; .env.backup is gitignored
+printf '\nDEV_AUTH_FALLBACK=true\n' >> .env
+docker compose up -d web           # recreate; ~15s to answer
+# … drive the browser as dev@local …
+cp .env.backup .env && rm .env.backup   # restore; never hand-edit the line out
+docker compose up -d web
+curl -s -o /dev/null -w '%{http_code}\n' localhost:3000/api/planner   # expect 401
+```
+
+Restore from the copy rather than deleting the line by hand, and `diff` the two
+before you trust it — `.env` holds four live secrets and is the one file in this
+repo that cannot be reconstructed. Delete any probe rows you created on the way
+out (`user_preferences`, `cook_logs`, `saved_recipes`, `grocery_checks`); a
+scratch user is easiest, since every one of those cascades from `users`.
+
+Two things that cost time last session, both tooling and not the app: browser
+clicks dispatched before React finishes hydrating 235 cards land on the DOM and
+silently do nothing, so wait for hydration or drive the element directly; and
+screenshots come back scaled ~0.907× from the 1280px viewport, so coordinates
+read straight off a screenshot are the correct ones to pass back.
 
 ---
 
@@ -88,14 +115,24 @@ Phase 4/5 probe rows were removed.
 
 Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **660
 passing** (shared 134, db 20, worker 473, web 33); four typechecks clean;
-production build clean; all four secrets absent from `apps/web/.next/static`;
-`/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file`,
-`POST /api/grocery`, `GET/POST /api/ratings` and `DELETE /api/ratings/:id` all
-respond correctly with the Compose stack up. The ratings flow (star picker,
-aspect chips, note, history, remove) was driven live through the in-app Browser
-pane, signed in via a temporary local `DEV_AUTH_FALLBACK=true` (reverted after
-— see the Phase 6 log entry in PROGRESS.md for exactly how, if you need to
-repeat it).
+production build clean, with `/api/preferences/rules` registered as a dynamic
+route; all four secrets absent from `apps/web/.next/static`; `/`, `/ops`,
+`/api/recipes`, `/api/recipes/:id`, `/api/images/:file`, `POST /api/grocery`,
+`GET/POST /api/ratings`, `DELETE /api/ratings/:id` and
+`GET/PATCH /api/preferences/rules` all respond correctly with the Compose stack
+up. Signed out, `/api/recipes` returns all 235 active recipes and
+`/api/preferences/rules` is a 401.
+
+The production build needs `DATABASE_URL` in its environment — `/api/health`
+imports `@recipes/shared/env` at module scope, so `next build` fails at "collect
+page data" without it. That is pre-existing and not a regression.
+
+Driven live in a browser, signed in through a temporary local
+`DEV_AUTH_FALLBACK=true` (reverted after; recipe above): the Phase 6 ratings
+flow, the Phase 5 grocery tab both signed in and signed out, and the Phase 7
+rules panel — two seeded rules took browse from 235 recipes to 173, and
+switching one off took it to 183 with the rule struck through and still
+listed.
 
 ---
 

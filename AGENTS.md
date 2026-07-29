@@ -13,10 +13,15 @@ Do not restart completed phases or re-research facts already recorded there.
 
 ## Current checkpoint
 
-- Phase 0 through Phase 6 are complete.
-- Resume at **Phase 7: personalization** — SQL-derived hard rules, an LLM soft
-  profile, batched recipe scoring with a visible one-line reason, and a
-  cold-start guard (`recipe_scores` stays empty below 5 rated recipes). See
+- Phase 0 through Phase 6 are complete. **Phase 7 is in progress**: its
+  deterministic half — hard rules derived in SQL, applied as a `WHERE` clause,
+  and shown in a panel with a per-rule switch — is done and verified live
+  (amendment A20).
+- Resume at **Phase 7 steps 2 and 3**: the LLM soft profile in
+  `user_preferences.profile`, and batched recipe scoring into `recipe_scores`
+  with a visible one-line reason, behind the cold-start guard
+  (`MIN_RATED_RECIPES_FOR_SCORING`, which nothing enforces yet). There are 0
+  `cook_logs`, so seed synthetic ones on a scratch user and drop it after. See
   `HANDOFF.md` for the brief.
 - Phase 6 (ratings) shipped `@recipes/shared/ratings`, `apps/web/src/lib/ratings.ts`,
   `GET/POST /api/ratings` + `DELETE /api/ratings/:id`, and a "Rate it" section in

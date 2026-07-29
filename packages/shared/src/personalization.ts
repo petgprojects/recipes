@@ -128,6 +128,20 @@ export function activeHardRules(rules: HardRule[]): HardRule[] {
   return rules.filter((rule) => rule.enabled);
 }
 
+/**
+ * The body of `PATCH /api/preferences/rules` — one switch, flipped.
+ *
+ * The rule is addressed by `id` rather than by position: the nightly job
+ * re-sorts the array and can insert a rule ahead of this one between a render
+ * and the click that follows it, so an index would address the wrong rule.
+ */
+export const hardRuleToggleSchema = z.object({
+  ruleId: z.string().min(1).max(200),
+  enabled: z.boolean(),
+});
+
+export type HardRuleToggle = z.infer<typeof hardRuleToggleSchema>;
+
 // ── Evidence ────────────────────────────────────────────────────────────────
 
 /** One bucket's worth of gathered evidence, as the worker's SQL returns it. */

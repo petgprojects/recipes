@@ -16,10 +16,11 @@
  * finished (PROGRESS.md amendment A13).
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CATEGORY_FILTER_ALL, CATEGORY_FILTER_UI } from '@recipes/shared/vocab';
 import { countGroceryItems } from '@recipes/shared/grocery';
 import type { PlannerState } from '@recipes/shared/planner';
+import type { HardRule } from '@recipes/shared/personalization';
 import {
   useGroceryQuery,
   useRecipesQuery,
@@ -30,6 +31,7 @@ import { usePlannerStore, type PlannerUser } from '@/lib/saved-store';
 import type { RecipeSummary } from '@/lib/recipe-types';
 import { AuthControls } from './auth-controls';
 import { GroceryReceipt } from './grocery-receipt';
+import { HardRules } from './hard-rules';
 import { PicksList } from './picks-list';
 import { RecipeCard } from './recipe-card';
 import { RecipeSheet } from './recipe-sheet';
@@ -47,6 +49,12 @@ interface PlannerProps {
   user: PlannerUser | null;
   /** That reader's picks as of the server render; absent when signed out. */
   initialPlannerState?: PlannerState;
+  /**
+   * The Phase 7 hard rules already applied to `initialRecipes`. Passed so the
+   * panel renders filled on the first paint rather than popping in — and so
+   * what the reader sees listed is exactly what filtered the feed they got.
+   */
+  initialHardRules?: HardRule[];
   /** Whether Google sign-in is configured at all (Phase 4 secrets present). */
   authEnabled: boolean;
 }
@@ -55,6 +63,7 @@ export function Planner({
   initialRecipes,
   user,
   initialPlannerState,
+  initialHardRules = [],
   authEnabled,
 }: PlannerProps) {
   const [tab, setTab] = useState<Tab>('browse');
@@ -74,6 +83,28 @@ export function Planner({
     setShown(live);
     setTab('browse');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [live]);
+
+  /**
+   * Flipping a hard rule changes the feed, and that change must *not* arrive as
+   * the "N new recipes" pill.
+   *
+   * The pill exists so a background poll cannot re-sort the list under someone
+   * mid-scroll (A13). A rule switch is the opposite situation: the reader just
+   * asked for this, they are looking at the panel that did it, and the recipes
+   * it un-hides are not new — they are recipes we were hiding from them.
+   * Announcing "10 new recipes" there would be a lie about where they came
+   * from. So the next feed is adopted directly.
+   */
+  const adoptNextFeed = useRef(false);
+  const onRulesChanged = useCallback(() => {
+    adoptNextFeed.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!adoptNextFeed.current) return;
+    adoptNextFeed.current = false;
+    setShown(live);
   }, [live]);
 
   const savedIds = useMemo(() => Object.keys(store.saved), [store.saved]);
@@ -197,6 +228,12 @@ export function Planner({
 
         {tab === 'browse' && (
           <>
+            <HardRules
+              signedIn={user !== null}
+              initialRules={initialHardRules}
+              onChanged={onRulesChanged}
+            />
+
             <div className="mp-chips">
               {CATEGORY_FILTER_UI.map((option) => (
                 <button

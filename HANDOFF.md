@@ -13,14 +13,44 @@ repository map, commands and working rules.
 
 ## Start here
 
-### Phase 7 — Personalization loop (the payoff)
+### Phase 7, continued — steps 2 and 3, the model half
 
-The Phase 5 grocery-tab browser check that used to head this file is **done**
-— see the 2026-07-28 entry in `PROGRESS.md`. Nothing was wrong with it. The one
-result worth carrying forward: the signed-out list (merged in TypeScript) and
-the signed-in list (merged in SQL) render identically down to which lines the
-migrated check-offs land on, so amendment A19's key-agreement invariant is now
-confirmed live and not only by the differential suite.
+**Steps 1 and 4 are done and verified live** (see the 2026-07-28 entries in
+`PROGRESS.md`, and amendment A20 for the design). Hard rules are derived
+deterministically in SQL, applied as a `WHERE` clause on browse, and shown in a
+panel above the feed with a working per-rule switch. Peter chose to finish the
+deterministic half before spending anything on the model.
+
+What remains is the part that costs money:
+
+1. **Step 2 — the soft profile.** Feed `cook_logs` (title, time, tags, rating,
+   aspects, notes) to OpenRouter and store a short prose profile in
+   `user_preferences.profile`. Follow `apps/worker/src/llm/suitability.ts`: a
+   direct, stateless structured-output call, no agent loop. The `profile`
+   column is deliberately untouched by both step-1 writers — check the
+   `onConflictDoUpdate` in `hard-rules.ts` and `preferences.ts` before adding a
+   third writer.
+2. **Step 3 — batched scoring.** Inject the profile into a batched prompt over
+   new recipes in the daily scan → `recipe_scores.score` plus a one-line
+   `reason` that must be **shown on the card**; PLAN.md is explicit that "an
+   opaque ranking is one you can't debug or trust."
+3. **The cold-start guard.** `MIN_RATED_RECIPES_FOR_SCORING` (5) exists in
+   `@recipes/shared/personalization` and is **not yet used by anything** —
+   step 3 is what enforces it. Below 5 rated recipes `recipe_scores` stays
+   empty and browse keeps its current sort, which is already the documented
+   cold-start order.
+4. **Score-aware ordering** in `listRecipes()`, above the existing
+   `published_at DESC` / source-rating tiebreak.
+
+**Test data.** There are still **0 `cook_logs`**, so nothing in steps 2 or 3 is
+exercisable as-is. Peter's call: seed synthetic logs on a scratch user, drive
+both steps, then drop the user — `cook_logs` cascades, and both new integration
+suites already use exactly that pattern.
+
+**A note on the grocery check**, now closed: the signed-out list (merged in
+TypeScript) and the signed-in list (merged in SQL) render identically down to
+which lines the migrated check-offs land on, so amendment A19's key-agreement
+invariant is confirmed live and not only by the differential suite.
 
 PLAN.md §5: nightly, per user — (1) derive hard rules deterministically in SQL
 (`median(rating) WHERE total_minutes > 60` etc. → `user_preferences.hard_rules`,
@@ -51,12 +81,13 @@ Phase 4/5 probe rows were removed.
   1,733 aliases. The 161 unmapped are compound/alternative lines that still
   render from `raw_text` — a successful terminal condition, not a backlog.
 - **2 users**: seeded `dev@local` and Peter's Google account. **0**
-  `saved_recipes`, **0** `grocery_checks`, **0** `cook_logs` — every probe row
-  from Phases 4, 5 and 6 was removed.
+  `saved_recipes`, **0** `grocery_checks`, **0** `cook_logs`, **0**
+  `user_preferences`, **0** `recipe_scores` — every probe row from Phases 4
+  through 7 was removed.
 - OpenRouter spend to date ≈ **$0.31**.
 
-Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **604
-passing** (shared 107, db 20, worker 461, web 16); four typechecks clean;
+Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **660
+passing** (shared 134, db 20, worker 473, web 33); four typechecks clean;
 production build clean; all four secrets absent from `apps/web/.next/static`;
 `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file`,
 `POST /api/grocery`, `GET/POST /api/ratings` and `DELETE /api/ratings/:id` all
@@ -141,6 +172,28 @@ Each one has a plausible-looking wrong version, and most fail silently.
   a friendly 400 — `cookLogCreateSchema`'s `ratingAspectSchema` (from
   `packages/shared/src/schemas.ts`, reused rather than redefined) is what turns
   that into a 400 before it reaches SQL.
+
+### Hard rules (A20)
+
+- **Both `listRecipes()` callers must pass the same rules.** The
+  server-rendered page is the client's `initialData`; a filter applied on one
+  path and not the other is a hydration mismatch, and it will look like the
+  feed flickering rather than like a bug in the filter.
+- **`/api/recipes` resolves rules from the session, never the query string.** A
+  filter over your own feed must not be something a caller can spoof or switch
+  off by editing a URL.
+- **Every clause keeps a row whose column is null.** An unknown `total_minutes`
+  or `category` has not been disliked. Hiding it would let missing data act as
+  a preference.
+- **A rule change is not a "N new recipes" pill.** Un-hidden recipes are not new
+  arrivals, and saying so is a lie about where they came from. `adoptNextFeed`
+  in `planner.tsx` handles it, and the flag is set *before* the invalidate
+  because the refetch can resolve in the same tick.
+- **A disabled rule stays listed and stays in the column.** Removing it from the
+  UI would leave no way to switch it back on; dropping it from `hard_rules`
+  would let the nightly job silently re-arm the filter.
+- **`hard_rules` is parsed, not cast** (`parseHardRules()`). One malformed entry
+  costs its own filter, not the browse feed.
 
 ### Auth and planner state (A15, A16, A17)
 

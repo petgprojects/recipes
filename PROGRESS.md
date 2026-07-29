@@ -423,6 +423,20 @@ that hides too much hides it invisibly:
 on the way out (`parseHardRules()`): an older deploy's shape or a hand edit in
 psql should cost that one rule its filter, not take the browse feed down.
 
+**Every clause keeps a row whose column is null.** A rule exists because of what
+a reader disliked about recipes we have data for. A recipe whose `total_minutes`
+or `category` Phase 2 could not derive has not been disliked — it is unknown —
+and hiding it would let missing data act as a preference.
+
+**A rule change is not a "new recipes" pill.** The pill (A13) exists so a
+background poll cannot re-sort the list under someone mid-scroll. A switch is
+the opposite: the reader just asked for it, is looking at the panel that did it,
+and the recipes it un-hides are not new arrivals — they are recipes we were
+hiding from them. `Planner` therefore adopts the next feed directly through
+`adoptNextFeed`, flagged *before* the invalidate because the refetch can resolve
+in the same tick. Without this, switching a filter off announces "10 new
+recipes", which is a lie about where they came from.
+
 ### A3 — Source list resolved (PLAN.md §8, open question 11)
 Budget Bytes, Pinch of Yum, Downshiftology, GypsyPlate, Skinnytaste, The
 Kitchn, Love & Lemons, Serious Eats.
@@ -1059,3 +1073,64 @@ browser's `localStorage` planner keys were cleared.
 (shared 107, db 20, worker 461, web 16). The 601 recorded at the Phase 6 exit
 predates commit a18b63c, which added the three shared schema tests; 604 is the
 correct baseline from here.
+
+### 2026-07-28 — Phase 7 steps 1 and 4: hard rules, and making them visible
+
+Peter chose to build the deterministic half end to end before spending anything
+on the model, so this session is PLAN.md §5 step 1 plus the UI that step 1 is
+useless without. Steps 2 (soft profile) and 3 (batched scoring) are next and
+carry the OpenRouter cost.
+
+**Step 1, the derivation.** `apps/worker/src/personalization/hard-rules.ts`
+gathers evidence in SQL — nested time buckets, disjoint categories, overlapping
+tags via `unnest` in a lateral join — and hands it to
+`@recipes/shared/personalization`, which is pure and decides. Amendment A20
+records the design: why cost and cleanup aspects cannot be filters, why the
+median, why the time ladder emits its loosest triggering threshold, and why a
+switched-off rule stays off.
+
+**Step 4, the filter and the panel.** `hardRuleFilter()` builds the `WHERE`
+fragment and `listRecipes()` takes the rules as an argument rather than
+resolving them itself — that keeps `lib/recipes.ts` free of auth, and it forces
+the point that **both** callers must pass the same rules. The server-rendered
+page is the client's `initialData`, so a filter applied on one path and not the
+other is a hydration mismatch. `/api/recipes` resolves them from the session,
+never from the query string: a filter over your own feed must not be something
+a caller can turn off by editing a URL.
+
+`GET/PATCH /api/preferences/rules` answers with the whole rule list on every
+verb, the same "mutation returns full state" shape the planner and ratings
+routes use.
+
+**Verified live**, signed in through a temporary local `DEV_AUTH_FALLBACK=true`
+with two rules seeded by hand (`exclude_category:Soup`,
+`max_minutes:90`). Browse went from 235 recipes to **173**, Kalua Pork (3 hr)
+correctly disappeared, and the panel rendered both rules as sentences with their
+evidence lines and two switches. Flipping Soup off took the feed to **183** —
+the ten soup recipes returning — with the rule struck through and still listed,
+so it can be switched back on.
+
+**That live run found one real bug.** The first time, un-hiding those ten
+recipes surfaced them as an orange **"10 new recipes — show them"** pill. The
+pill logic was behaving exactly as specified (ids never shown before), but the
+sentence was wrong: they were not new, they were recipes we had been hiding.
+Fixed with `adoptNextFeed`, and written up in A20. Nothing but a browser would
+have caught this — every assertion involved was already passing.
+
+**Cleanup.** The seeded rules were deleted and `.env` restored byte-identical
+from backup; `GET /api/preferences/rules` is back to 401 and `/api/recipes`
+back to 235 unfiltered. Database is again 2 users, 0 `user_preferences`, 0
+`cook_logs`, 0 `saved_recipes`, 0 `grocery_checks`.
+
+**Verification.** 660 tests passing (shared 134, db 20, worker 473, web 33 —
+the 56 new ones are 27 pure, 12 worker integration and 17 web integration, all
+on scratch users that cascade away). Four typechecks clean, production build
+clean with `/api/preferences/rules` registered as a dynamic route, all four
+secrets absent from `apps/web/.next/static`.
+
+**Still to do in Phase 7.** Step 2 (LLM soft profile), step 3 (batched scoring
+into `recipe_scores` with a one-line reason), the score-aware browse ordering
+above the existing cold-start sort, and the `MIN_RATED_RECIPES_FOR_SCORING`
+guard — the constant exists and is unused until step 3. Peter's call on test
+data: seed synthetic `cook_logs` on a scratch user, drive both steps, then drop
+it.

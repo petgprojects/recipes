@@ -17,6 +17,8 @@
 
 import { and, db, desc, eq, gt, ingredients, recipeIngredients, recipes, sources, sql } from '@recipes/db';
 import { RECIPE_STATUS, type RecipeStatus } from '@recipes/shared';
+import type { HardRule } from '@recipes/shared/personalization';
+import { hardRuleFilter } from './preferences';
 import type { RecipeDetail, RecipeSummary } from './recipe-types';
 
 export type { RecipeDetail, RecipeIngredientLine, RecipeSummary } from './recipe-types';
@@ -36,6 +38,15 @@ export interface ListRecipesOptions {
   limit?: number;
   /** `null` means every status; the default is browse-ready rows only. */
   status?: RecipeStatus | null;
+  /**
+   * The reader's Phase 7 hard rules, already loaded. Passed in rather than
+   * resolved here so this module stays free of auth: `/api/recipes` and the
+   * server-rendered page each call `getUserPreferences()` themselves and hand
+   * the result over. Both *must* pass the same rules — the page's output is the
+   * client's `initialData`, so a filter applied on one path and not the other
+   * is a hydration mismatch.
+   */
+  hardRules?: HardRule[];
 }
 
 const summaryColumns = {
@@ -91,6 +102,10 @@ export function isRecipeStatus(value: string): value is RecipeStatus {
  * Browse order is PLAN.md §7's cold start: newest first, source rating as the
  * tiebreak. `published_at` can be null on a sitemap-discovered page, so those
  * rows sort by when we first saw them instead of jumping to the top.
+ *
+ * Phase 7 adds the reader's hard rules as a `WHERE` clause here — deliberately
+ * a filter and not a ranking. A rule says "don't show me this", so a recipe it
+ * matches must not appear at position 200 either.
  */
 export async function listRecipes(options: ListRecipesOptions = {}): Promise<RecipeSummary[]> {
   const limit = Math.min(Math.max(1, options.limit ?? DEFAULT_RECIPE_LIMIT), MAX_RECIPE_LIMIT);
@@ -104,6 +119,7 @@ export async function listRecipes(options: ListRecipesOptions = {}): Promise<Rec
       and(
         status === null ? undefined : eq(recipes.status, status),
         options.since ? gt(recipes.lastSeenAt, options.since) : undefined,
+        hardRuleFilter(options.hardRules ?? []),
       ),
     )
     .orderBy(

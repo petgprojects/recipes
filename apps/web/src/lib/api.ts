@@ -7,6 +7,7 @@ import { useQueries, useQuery, type UseQueryResult } from '@tanstack/react-query
 import type { GroceryAisleGroup } from '@recipes/shared/grocery';
 import type { CheckedMap, PlannerState, SavedMap } from '@recipes/shared/planner';
 import type { CookLogCreate, CookLogEntry } from '@recipes/shared/ratings';
+import type { HardRule } from '@recipes/shared/personalization';
 import type { RecipeDetail, RecipeSummary } from './recipe-types';
 
 /** PLAN.md §5: "TanStack Query with `refetchInterval` (~5 min)". */
@@ -239,4 +240,41 @@ export function deleteCookLog(id: string, recipeId: string): Promise<CookLogEntr
     `/api/ratings/${id}?recipeId=${recipeId}`,
     'DELETE',
   );
+}
+
+// ── Hard rules (Phase 7) ────────────────────────────────────────────────────
+
+export const hardRuleKeys = {
+  /**
+   * A module constant, not a fresh array — the same reasoning as
+   * `plannerKeys.state()`. This key is a `useEffect`/`useQuery` dependency, and
+   * a new identity per render restarts the query on every render.
+   */
+  list: ['hardRules', 'list'] as const,
+};
+
+export function fetchHardRules(): Promise<HardRule[]> {
+  return getJson<HardRule[]>('/api/preferences/rules');
+}
+
+/**
+ * Enabled only for a signed-in reader: signed out there are no rules, the feed
+ * is unfiltered by definition, and the endpoint 401s.
+ */
+export function useHardRulesQuery(enabled: boolean, initialData: HardRule[] | undefined) {
+  return useQuery({
+    queryKey: hardRuleKeys.list,
+    queryFn: fetchHardRules,
+    enabled,
+    initialData: enabled ? initialData : undefined,
+    // The server rendered these on this very page load; refetching on mount is
+    // a wasted round-trip, same reasoning as the browse feed and planner state.
+    initialDataUpdatedAt: () => Date.now(),
+    staleTime: POLL_INTERVAL_MS,
+  });
+}
+
+/** Returns the whole updated rule list, same shape the query caches. */
+export function setHardRuleEnabled(ruleId: string, enabled: boolean): Promise<HardRule[]> {
+  return sendJson<HardRule[]>('/api/preferences/rules', 'PATCH', { ruleId, enabled });
 }

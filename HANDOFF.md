@@ -23,7 +23,7 @@ carried over. The next move is a decision rather than a task, and it is Peter's:
 | **pgvector similarity** | PLAN.md §5 defers it deliberately: "add it later, as a *signal feeding into* the score, once there's enough history to justify it." The table exists. Today there are 0 `cook_logs`, so there is not enough history. |
 | **Reddit** | The adapter is production-wired with `enabled = false`. One boolean turns it on, and it needs credentials that reCAPTCHA has so far prevented creating. |
 | **Live use** | Nothing is blocking daily use. The loop needs 5 rated recipes per reader before it does anything. |
-| **Deploy to the server** | Config is in place (A22): `compose.prod.yml` publishes almost nothing, `compose.tunnel.yml` adds Cloudflare Tunnel. Waiting on Peter for the Google console's deployed redirect URI + verified domain, and a `TUNNEL_TOKEN`. `compose.prod.yml` has still never been run. |
+| **Deploy to the server** | Config is in place and the prod stack has been run and verified (A22): `compose.prod.yml` publishes almost nothing, `compose.tunnel.yml` adds Cloudflare Tunnel, `COMPOSE_FILE` in the server's `.env` makes bare `docker compose up -d --build` mean all of it. Waiting on Peter for the Google console's deployed redirect URI + verified domain, and a `TUNNEL_TOKEN`. A fresh server starts with **0 recipes** — the corpus is in `pgdata`, so plan a dump/restore or a re-crawl. |
 
 ### How the nightly loop fits together
 
@@ -267,12 +267,17 @@ Each one has a plausible-looking wrong version, and most fail silently.
   server-to-server hop fails, presenting as a generic `?error=Configuration`.
   `trustHost: true` does **not** fix it.
 - **This is not a localhost lock-in.** Pinning a public `https` origin satisfies
-  the same requirement; the port was never the constraint. Two traps when you do
-  (A22): `NEXT_PUBLIC_APP_URL` is inlined by `next build`, so it must be set
-  *before* `docker compose build` or the server and the bundle disagree about the
-  origin; and an `https` value switches Auth.js to `__Secure-` cookies, so a
-  mismatch between the real scheme and the configured one gives you a sign-in
-  that completes and then has no session.
+  the same requirement; the port was never the constraint (A22).
+- **An `https` `AUTH_URL` switches Auth.js to `__Secure-` cookies.** Correct
+  behind Cloudflare, where the browser's leg is HTTPS even though the last hop to
+  the container is not. A mismatch between the real scheme and the configured one
+  gives you a sign-in that completes and then has no session — not an error.
+- **`AUTH_URL` is the runtime value that decides sign-in; `NEXT_PUBLIC_APP_URL`
+  is a build input on paper only.** Nothing in `apps/web/src` reads the latter —
+  verified absent from the built `.next/static` — so its readers today are
+  compose's `AUTH_URL` derivation and the worker's `HTTP-Referer`. Still set it
+  before `docker compose build`, because that stops being true the moment a
+  client component reads it; just don't debug a deployment there first.
 - **The deployed callback needs registering, but not a second OAuth client.** One
   client holds many redirect URIs, so localhost and the deployed origin coexist.
   The consent screen's *Authorized domains* is the step with a wait — Google
@@ -321,6 +326,13 @@ Each one has a plausible-looking wrong version, and most fail silently.
   anonymous dependency volumes:
   `docker compose build && docker compose rm -svf web worker migrate && docker compose up -d`.
   `rm -sv` leaves named volumes alone. `down -v` is only for a deliberate reset.
+- **Bare `docker compose` means the dev stack**, including on a server, unless
+  `COMPOSE_FILE` is set in that machine's `.env`. Locally it must stay unset. To
+  exercise the production stack on a machine that already runs the dev one, use a
+  separate project *and* a free port — `-p recipes-prodtest … WEB_PORT=3100`, with
+  `SCAN_BOOTSTRAP_ENABLED=false` so the throwaway stack cannot crawl or spend.
+  That is how A22 was verified; `down -v` on that project touches only its own
+  volumes, never `recipes_pgdata`.
 - **Never run a second web instance in this Compose project.** It shares the
   `web-next` volume and two dev servers writing one `.next` corrupts it — the
   page goes blank with `ENOENT … /.next/server/pages/_document.js`. Recover:

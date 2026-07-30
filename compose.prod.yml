@@ -11,11 +11,13 @@
 #
 #   docker compose -f docker-compose.yml -f compose.prod.yml -f compose.tunnel.yml up -d --build
 #
-# NOT exercised by Phase 0 — the dev stack is the tested path. Things to check
-# the first time this is used for real: NEXT_PUBLIC_APP_URL must be the public
-# origin (it is baked into the client bundle at build time, so it cannot be
-# changed by restarting the container) and AUTH_SECRET must be set. See
-# PROGRESS.md amendment A22 for the whole deployment checklist.
+# Brought up and verified end to end on 2026-07-29 in a throwaway project — build,
+# migrate, `next start`, worker — which is what found the two `prod.Dockerfile`
+# bugs (see PROGRESS.md amendment A22). Still unexercised: the tunnel and the
+# Google callback against a real public hostname.
+#
+# Set NEXT_PUBLIC_APP_URL to the public origin before building, and AUTH_SECRET
+# before expecting sign-in to work. A22 has the whole deployment checklist.
 #
 # `!reset` is what removes an inherited list entry — compose merges sequences by
 # union, so without it the dev bind mounts would survive into production.

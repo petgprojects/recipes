@@ -525,13 +525,20 @@ narrow case, not the normal one.
 So the port is the whole change, and it is four settings and two console steps.
 The parts that are not obvious:
 
-**1. `NEXT_PUBLIC_APP_URL` is a build input, not a runtime one.** `next build`
-inlines every `NEXT_PUBLIC_*` variable into the client bundle, which is why
-`compose.prod.yml` passes it as a build *arg*. Editing `.env` and restarting the
-container changes what the server thinks the origin is while the already-built
-JavaScript keeps the old one — a split-brain that presents as sporadic wrong-host
-requests rather than as a misconfiguration. Set it before `docker compose build`;
-a later change is a rebuild.
+**1. `NEXT_PUBLIC_APP_URL` is a build input by contract, though not yet in
+practice.** `next build` inlines any *referenced* `NEXT_PUBLIC_*` variable into
+the client bundle, which is why `compose.prod.yml` passes it as a build arg;
+editing `.env` and restarting would then leave the server on the new origin and
+the shipped JavaScript on the old one. Measured against the built image, though,
+the string does not appear in `apps/web/.next/static` at all: nothing in
+`apps/web/src` reads it. Today its only readers are `AUTH_URL`'s derivation in
+compose and the worker's OpenRouter `HTTP-Referer` header, both runtime.
+
+So set it before `docker compose build` and treat a change as a rebuild — that is
+the rule that stays correct the first time a client component reads it, and the
+cost of following it is nothing. But when a deployment misbehaves, this is not
+where to look first: `AUTH_URL` is the value that decides sign-in, and it is
+purely runtime.
 
 **2. An `https` origin silently changes the cookies.** Auth.js decides cookie
 `Secure` and the `__Secure-`/`__Host-` name prefixes from whether its URL is
@@ -570,6 +577,48 @@ of the mapping — the container keeps binding 3000, which is what the healthche
 and the tunnel's route both name. A server with something already on 3000 needs
 `WEB_PORT=3100` and nothing else.
 
+`DB_PORT` needs nothing at all in production, since nothing is published. It is
+worth knowing that it is *not* the same kind of knob as `WEB_PORT` for anyone who
+publishes the database deliberately: `DATABASE_URL`'s host-side port has to be
+edited to match by hand, because compose interpolates `.env` into the compose file
+and not into its own values, and `DB_PORT` is read in exactly one line
+(`docker-compose.yml`'s `ports`). On a host that already runs another Postgres
+the mismatch is quiet rather than loud — the stack comes up healthy on `db:5432`
+while host-side tools and the database-backed test suites connect to the
+neighbour on the old port.
+
+**6. A bare `docker compose up -d --build` had to keep meaning something safe.**
+On a server the natural command is the bare one, and bare compose means the *dev*
+stack: `next dev`, bind mounts of a checkout, hot reload, `0.0.0.0:3000` and
+`0.0.0.0:5432`. Adding `COMPOSE_FILE=docker-compose.yml:compose.prod.yml:compose.tunnel.yml`
+to the server's `.env` makes every plain compose command — `up`, `logs`, `ps`,
+`down` — mean the production stack instead, with no `-f` flags to remember and no
+way to bring the dev stack up there by accident. It stays commented out in
+`.env.example` so bare compose keeps meaning dev locally, which is what every
+existing instruction in `AGENTS.md` and `HANDOFF.md` assumes.
+
+**7. Two things in `prod.Dockerfile` were broken, and only building it found
+them.** Both were invisible to every test and to `docker compose config`.
+
+`next build` failed outright. `/` and `/api/health` import `@recipes/shared/env`,
+whose Zod validation runs at module scope, and Next evaluates every route module
+during "collect page data" — so the build needs `DATABASE_URL` present. `.env` is
+in `.dockerignore` (correctly — secrets must not enter an image layer), so there
+was nothing to supply it and the stage could never have succeeded. The fix is a
+build-only `ARG` with a dummy value: nothing connects, because both routes are
+`force-dynamic` and neither is prerendered. It is an `ARG` and not an `ENV` so it
+cannot persist into the runtime image and shadow the real one — verified absent
+from `printenv` in the built image. A bogus `DATABASE_URL` at run time must fail
+loudly, not quietly point somewhere else.
+
+The worker could not have written a single photo. `data/` is in `.dockerignore`,
+so `/app/data/images` was absent from the image; Docker then creates that
+mountpoint for the `recipe-images` volume owned by root, and both runtime stages
+run `USER node`. The image pipeline would have failed on first write, after a
+successful crawl. Both stages now `mkdir -p` and `chown` the directory before
+dropping privileges — the same line in both, because they share the volume and
+must agree about its ownership.
+
 One thing deliberately left alone: `trustHost: true` stays on and stays
 sufficient. With `AUTH_URL` pinned, Auth.js does not need to infer anything from
 forwarded headers, so the proxy hop needs no further configuration. The related
@@ -578,10 +627,27 @@ signs in through one) are rejected when `Origin` disagrees with the host the
 server sees. cloudflared preserves the original `Host`, so it agrees; a proxy
 that rewrites it would need `experimental.serverActions.allowedOrigins`.
 
-**Untested surface.** `compose.prod.yml` has never been run — its own header has
-said so since Phase 0, and these changes do not change that. The first real
-deployment is where the production Dockerfile targets, the built-in
-`NEXT_PUBLIC_APP_URL` and the tunnel get exercised together for the first time.
+**The prod stack has now actually been run**, which it never had been before —
+that is how the two `prod.Dockerfile` bugs above were found. Verified on
+2026-07-29 in a throwaway project (`-p recipes-prodtest`, `WEB_PORT=3100`, its own
+volumes, `SCAN_BOOTSTRAP_ENABLED=false` so it could not crawl or spend), torn down
+with `down -v` afterwards; the dev project's volumes and its 425 recipes were
+untouched throughout:
+
+- all three images build (`web`, `worker`, `migrate`);
+- `migrate` exits 0 — migrations and the 117-ingredient seed run under `USER node`;
+- `web` serves `/api/health` 200 (`migrated: true`, `seeded: true`), plus `/`,
+  `/ops` and `/api/recipes` 200, as `next start` under `NODE_ENV=production`;
+- `worker` boots clean as `node`, schedules its cron, and `/app/data/images` is
+  writable;
+- no secrets in `apps/web/.next/static`.
+
+**What is still untested** is narrower but real: the Cloudflare Tunnel and the
+Google callback against a public hostname — neither can be exercised without the
+domain, the token and the console changes. Everything on this side of that line
+now has a run behind it. A fresh server also starts with an **empty corpus**: the
+recipes live in the `pgdata` volume, not in the repo, so a new machine seeds 117
+ingredients and 0 recipes and either re-crawls or restores a dump.
 
 ### A3 — Source list resolved (PLAN.md §8, open question 11)
 Budget Bytes, Pinch of Yum, Downshiftology, GypsyPlate, Skinnytaste, The

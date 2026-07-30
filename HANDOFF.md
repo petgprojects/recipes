@@ -23,7 +23,7 @@ carried over. The next move is a decision rather than a task, and it is Peter's:
 | **pgvector similarity** | PLAN.md §5 defers it deliberately: "add it later, as a *signal feeding into* the score, once there's enough history to justify it." The table exists. Today there are 0 `cook_logs`, so there is not enough history. |
 | **Reddit** | The adapter is production-wired with `enabled = false`. One boolean turns it on, and it needs credentials that reCAPTCHA has so far prevented creating. |
 | **Live use** | Nothing is blocking daily use. The loop needs 5 rated recipes per reader before it does anything. |
-| **Deploy to the server** | Config is in place and the prod stack has been run and verified (A22): `compose.prod.yml` publishes almost nothing, `compose.tunnel.yml` adds Cloudflare Tunnel, `COMPOSE_FILE` in the server's `.env` makes bare `docker compose up -d --build` mean all of it. Waiting on Peter for the Google console's deployed redirect URI + verified domain, and a `TUNNEL_TOKEN`. A fresh server starts with **0 recipes** — the corpus is in `pgdata`, so plan a dump/restore or a re-crawl. |
+| **Deploy to the server** | Config is in place and the prod stack has been run and verified (A22): `compose.prod.yml` publishes almost nothing, `compose.tunnel.yml` adds Cloudflare Tunnel, `COMPOSE_FILE` in the server's `.env` makes bare `docker compose up -d --build` mean all of it. Waiting on Peter for the Google console's deployed redirect URI + verified domain, and a `TUNNEL_TOKEN`. A fresh server starts with **0 recipes** — the corpus is in `pgdata`, not the repo; `AGENTS.md` has a verified dump/restore runbook. |
 
 ### How the nightly loop fits together
 

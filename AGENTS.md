@@ -146,6 +146,97 @@ docker compose up -d web
 The volume is build output, so nothing is lost. Use `-p <other-project>` if a
 second instance is genuinely needed.
 
+## Moving the corpus to another machine
+
+The 425 recipes are not in the repository — they are in the `pgdata` volume, and
+their photos are in `recipe-images`. A fresh server therefore starts with 117
+seeded ingredients and **zero recipes**. Both halves have to travel, and they
+have to travel together: the database rows carry `image_local_path`, so a
+database restored without the images renders 425 cards with broken photos.
+
+Verified end to end on 2026-07-29 (amendment A22) — restored into a throwaway
+project, which then served all 425 recipes and a real cached photo over HTTP.
+
+**A dump is a credential.** `accounts` holds `access_token` and `id_token`
+columns for every linked Google account, and `sessions` holds live session
+tokens. Treat `recipes.dump` exactly like `.env`: never commit it, move it over
+`scp`, and delete it from both machines when the restore is confirmed.
+
+### 1. On the source machine
+
+Stop the worker first. `pg_dump` is internally consistent, but the images are a
+*separate* archive, and a crawl finishing between the two writes rows that
+reference files the tar never saw.
+
+```bash
+docker compose stop worker
+docker compose exec -T db pg_dump -U recipes -d recipes -Fc --no-owner --no-privileges > recipes.dump
+docker run --rm -v recipes_recipe-images:/src:ro -v "$PWD":/out alpine \
+  tar czf /out/recipe-images.tgz -C /src .
+docker compose start worker
+```
+
+Expect roughly 1.2 MB and 39 MB respectively at the Phase 7 corpus size. `-Fc`
+is the custom format — compressed, and restorable by `pg_restore`.
+
+### 2. On the target machine, before the first full `up`
+
+Bring up **only** the database, so `migrate` does not create a schema for the
+restore to collide with:
+
+```bash
+docker compose up -d db
+```
+
+Then wait for it properly. Do **not** gate on `pg_isready`: the postgres image's
+first-boot initialisation runs a *transient* server on the same socket before it
+creates `recipes` and restarts, so `pg_isready` reports ready while the database
+does not yet exist, and the restore fails with `database "recipes" does not
+exist`. Gate on a real query instead:
+
+```bash
+until docker compose exec -T db psql -U recipes -d recipes -c 'select 1' >/dev/null 2>&1; do sleep 1; done
+docker compose exec -T db pg_restore -U recipes -d recipes --no-owner --no-privileges < recipes.dump
+```
+
+The dump carries the schema, the four extensions (`vector`, `citext`, `pg_trgm`,
+`pgcrypto`) and `drizzle.__drizzle_migrations`, which is what makes the ordering
+work: the later `migrate` service finds all four migrations already recorded and
+the seed's upserts find nothing new, so a normal `up` is an idempotent no-op over
+restored data rather than a conflict.
+
+### 3. The images, and the ownership trap
+
+```bash
+docker run --rm -v recipes_recipe-images:/dst -v "$PWD":/in:ro alpine \
+  tar xzf /in/recipe-images.tgz -C /dst
+docker run --rm -v recipes_recipe-images:/dst alpine chown -R 1000:1000 /dst
+```
+
+The `chown` is required, not defensive. The archive's `./` entry resets the
+directory to `root:root` on extraction, and the production images run `USER node`
+(uid 1000) — so without it the worker cannot write the next photo it downloads,
+having crawled the page successfully first. 1000 is `node`'s uid in
+`node:24-bookworm-slim`; the dev images run as root and would not have noticed.
+
+### 4. Then the rest, and check it
+
+```bash
+docker compose up -d
+curl -s localhost:${WEB_PORT:-3000}/api/health
+```
+
+`/api/health` must report the source machine's counts — `"recipes":425` and
+`"ingredients":789`, not the seed's 117. Then fetch one photo by its
+`image_local_path` through `/api/images/:file` and expect a `200` with
+`image/webp`; that is the check that proves both halves arrived, and it is the
+one a database-only restore fails.
+
+Two things a restore deliberately carries over: `users` and `accounts`, so the
+same Google account links to the same user row and its ratings and saved recipes
+survive the move. `sessions` rows come too and are harmless — their cookies were
+issued for the old origin and will never be sent to the new one.
+
 ## Verification baseline
 
 At the Phase 7 checkpoint:

@@ -646,8 +646,15 @@ untouched throughout:
 Google callback against a public hostname — neither can be exercised without the
 domain, the token and the console changes. Everything on this side of that line
 now has a run behind it. A fresh server also starts with an **empty corpus**: the
-recipes live in the `pgdata` volume, not in the repo, so a new machine seeds 117
-ingredients and 0 recipes and either re-crawls or restores a dump.
+recipes live in the `pgdata` volume and their photos in `recipe-images`, neither
+of which is in the repo, so a new machine seeds 117 ingredients and 0 recipes and
+either re-crawls or restores a dump. `AGENTS.md` holds the runbook for the latter,
+verified the same day by restoring into a throwaway project that then served all
+425 recipes and a real cached photo over HTTP. Its two non-obvious steps: gate on
+a real query rather than `pg_isready` (the postgres image's first-boot init runs a
+transient server on the same socket, so `pg_isready` is ready before the database
+exists), and `chown -R 1000:1000` the image volume after extracting, because tar's
+`./` entry resets it to root and the production images run `USER node`.
 
 ### A3 — Source list resolved (PLAN.md §8, open question 11)
 Budget Bytes, Pinch of Yum, Downshiftology, GypsyPlate, Skinnytaste, The

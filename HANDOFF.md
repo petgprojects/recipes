@@ -5,7 +5,7 @@ the personalization loop runs end to end and was verified live against the real
 provider.
 
 This file is **not** a history — it holds only what still constrains the code.
-`PROGRESS.md` is the archive: every amendment (A1–A21), why each decision was
+`PROGRESS.md` is the archive: every amendment (A1–A22), why each decision was
 made, and a log entry per phase. Read that when you need the reasoning behind a
 rule here, or before reopening a settled decision. `AGENTS.md` has the
 repository map, commands and working rules.
@@ -23,6 +23,7 @@ carried over. The next move is a decision rather than a task, and it is Peter's:
 | **pgvector similarity** | PLAN.md §5 defers it deliberately: "add it later, as a *signal feeding into* the score, once there's enough history to justify it." The table exists. Today there are 0 `cook_logs`, so there is not enough history. |
 | **Reddit** | The adapter is production-wired with `enabled = false`. One boolean turns it on, and it needs credentials that reCAPTCHA has so far prevented creating. |
 | **Live use** | Nothing is blocking daily use. The loop needs 5 rated recipes per reader before it does anything. |
+| **Deploy to the server** | Config is in place (A22): `compose.prod.yml` publishes almost nothing, `compose.tunnel.yml` adds Cloudflare Tunnel. Waiting on Peter for the Google console's deployed redirect URI + verified domain, and a `TUNNEL_TOKEN`. `compose.prod.yml` has still never been run. |
 
 ### How the nightly loop fits together
 
@@ -258,13 +259,24 @@ Each one has a plausible-looking wrong version, and most fail silently.
   `packages/shared/src/schemas.ts`, reused rather than redefined) is what turns
   that into a 400 before it reaches SQL.
 
-### Auth and planner state (A15, A16, A17)
+### Auth and planner state (A15, A16, A17, A22)
 
 - **`AUTH_URL` must stay pinned** in `docker-compose.yml`. The container binds
   `0.0.0.0`, so Auth.js would send that as the token-exchange `redirect_uri` and
   Google rejects it. The consent screen looks perfect and only the last
   server-to-server hop fails, presenting as a generic `?error=Configuration`.
   `trustHost: true` does **not** fix it.
+- **This is not a localhost lock-in.** Pinning a public `https` origin satisfies
+  the same requirement; the port was never the constraint. Two traps when you do
+  (A22): `NEXT_PUBLIC_APP_URL` is inlined by `next build`, so it must be set
+  *before* `docker compose build` or the server and the bundle disagree about the
+  origin; and an `https` value switches Auth.js to `__Secure-` cookies, so a
+  mismatch between the real scheme and the configured one gives you a sign-in
+  that completes and then has no session.
+- **The deployed callback needs registering, but not a second OAuth client.** One
+  client holds many redirect URIs, so localhost and the deployed origin coexist.
+  The consent screen's *Authorized domains* is the step with a wait — Google
+  requires Search Console domain verification first.
 - **Auth stays optional at boot.** Never call `requireEnv()` at module scope in
   `lib/auth.ts` — it would make importing the file a boot requirement and take
   the signed-out planner down with it.
@@ -346,7 +358,11 @@ Each one has a plausible-looking wrong version, and most fail silently.
   `diff .env .env.backup > /dev/null; echo $?`.
 - The Google client's registered callback is
   `http://localhost:3000/api/auth/callback/google`. Changing the app's host or
-  port means updating both that registration and `AUTH_URL`.
+  port means updating both that registration and `AUTH_URL` — *adding* an origin
+  means adding a second redirect URI to the same client and leaving this one
+  alone (A22).
+- `TUNNEL_TOKEN` is not configured yet. It is only read by `compose.tunnel.yml`,
+  which is opt-in, so its absence blocks nothing local.
 - Reddit credentials are still unavailable (app creation fails a reCAPTCHA
   check). The adapter is production-wired with `enabled = false`; flipping one
   boolean turns it on. It blocks nothing.

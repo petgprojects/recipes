@@ -14,11 +14,21 @@ on Peter**.
 | `OPENROUTER_API_KEY` | Phase 2 | ✅ configured in local `.env` (never printed or committed) |
 | Reddit API credentials | Phase 2 (Reddit source only) | ⛔ blocked — see below |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `AUTH_SECRET` | Phase 4 | ✅ configured in local `.env` (never printed or committed) |
+| Google console: deployed redirect URI + verified domain | Deployment | ⏳ Peter's to do — see below |
+| `TUNNEL_TOKEN` | Deployment (Cloudflare Tunnel) | ⏳ Peter's to do — Cloudflare Zero Trust → Networks → Tunnels |
 
 Google OAuth redirects to the exact callback
 `http://localhost:3000/api/auth/callback/google`, and Peter's email is an
 allowed test user. All three Phase 4 secrets are now in the local `.env`, and a
 real end-to-end Google sign-in has been driven through the live app.
+
+**Deploying to a public hostname** needs two things only Peter's Google account
+can do, and the second one has a wait in it. On the *existing* OAuth client, add
+`https://<host>/api/auth/callback/google` to the authorized redirect URIs and
+keep the localhost entry — one client serves both environments. Then add the
+domain to the consent screen's *Authorized domains*, which Google will not accept
+until the domain is verified in Search Console via a DNS record. The code side is
+done; amendment A22 has the full checklist and the reasons.
 
 **Reddit blocker.** App creation at reddit.com/prefs/apps fails with the
 "Responsible Builder Policy" message; browser console shows a 401 from
@@ -499,6 +509,79 @@ what makes the call batchable and cheap — so it has no counts to cite, and
 asking for that phrasing would be asking it to invent them. The prompt requires
 a clause grounded in the profile instead, and forbids counts and star ratings
 outright.
+
+### A22 — A public origin is configuration, not a port change
+*Deployment. Raised by Peter on 2026-07-29: "am I stuck with localhost:3000?"*
+
+No. Nothing in the app hardcodes an origin — `AUTH_URL` and
+`NEXT_PUBLIC_APP_URL` are Zod-declared with localhost *defaults*, and
+`docker-compose.yml` derives the first from the second. A16's constraint is
+often misread as "Google only allows localhost"; what it actually says is that
+Auth.js must be told its origin explicitly rather than inferring `0.0.0.0` from
+`request.url`. A public hostname satisfies that requirement the same way
+localhost does, and satisfies it better — Google's loopback exemption is the
+narrow case, not the normal one.
+
+So the port is the whole change, and it is four settings and two console steps.
+The parts that are not obvious:
+
+**1. `NEXT_PUBLIC_APP_URL` is a build input, not a runtime one.** `next build`
+inlines every `NEXT_PUBLIC_*` variable into the client bundle, which is why
+`compose.prod.yml` passes it as a build *arg*. Editing `.env` and restarting the
+container changes what the server thinks the origin is while the already-built
+JavaScript keeps the old one — a split-brain that presents as sporadic wrong-host
+requests rather than as a misconfiguration. Set it before `docker compose build`;
+a later change is a rebuild.
+
+**2. An `https` origin silently changes the cookies.** Auth.js decides cookie
+`Secure` and the `__Secure-`/`__Host-` name prefixes from whether its URL is
+`https`. Behind Cloudflare the last hop to the container is plain HTTP, but the
+browser's connection is HTTPS, so the https value is the correct one and the
+cookies work. The failure mode to know: serving the *public* origin over plain
+HTTP with an `https` `AUTH_URL`, or the reverse, produces a sign-in that
+completes and then has no session, because the cookie the browser was told to
+set is not one it will send back.
+
+**3. Google's consent screen needs the domain verified, and this is the step with
+a wait.** The redirect URI itself is a one-line addition to the existing OAuth
+client — a client holds many, so `http://localhost:3000/api/auth/callback/google`
+and the deployed callback coexist and one client serves both environments. But
+the consent screen's *Authorized domains* list will not accept a domain until
+Google agrees you own it, which means verifying it in Search Console with a DNS
+record first. `localhost` is exempt from all of this, which is exactly why Phase
+4 never met it.
+
+**4. Cloudflare Tunnel rather than an open port.** `compose.tunnel.yml` adds one
+`cloudflared` service that dials out and receives requests over that connection:
+no inbound firewall rule, no certificate on the server, and the route
+(`recipes.petergelgor.ca` → `http://web:3000`) lives in the Cloudflare dashboard
+rather than in a config file to keep in sync. It is a third overlay rather than
+part of `compose.prod.yml` because `TUNNEL_TOKEN` is required and compose
+resolves `${VAR:?}` for a whole file before filtering services by profile —
+inside the prod overlay it would break a local production smoke test for someone
+who wants no tunnel at all.
+
+**5. The prod overlay now publishes almost nothing.** `db` stops being reachable
+from the host (default credentials on a public machine, and a collision with any
+Postgres the host already runs; `docker compose exec db psql -U recipes recipes`
+replaces it), and `web` binds `127.0.0.1:${WEB_PORT}` only, for `curl`ing
+`/api/health` over SSH. `WEB_PORT` already existed and moves only the host side
+of the mapping — the container keeps binding 3000, which is what the healthcheck
+and the tunnel's route both name. A server with something already on 3000 needs
+`WEB_PORT=3100` and nothing else.
+
+One thing deliberately left alone: `trustHost: true` stays on and stays
+sufficient. With `AUTH_URL` pinned, Auth.js does not need to infer anything from
+forwarded headers, so the proxy hop needs no further configuration. The related
+header dependency is Next.js's, not Auth.js's — Server Actions (`lib/auth-actions.ts`
+signs in through one) are rejected when `Origin` disagrees with the host the
+server sees. cloudflared preserves the original `Host`, so it agrees; a proxy
+that rewrites it would need `experimental.serverActions.allowedOrigins`.
+
+**Untested surface.** `compose.prod.yml` has never been run — its own header has
+said so since Phase 0, and these changes do not change that. The first real
+deployment is where the production Dockerfile targets, the built-in
+`NEXT_PUBLIC_APP_URL` and the tunnel get exercised together for the first time.
 
 ### A3 — Source list resolved (PLAN.md §8, open question 11)
 Budget Bytes, Pinch of Yum, Downshiftology, GypsyPlate, Skinnytaste, The

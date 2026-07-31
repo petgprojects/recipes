@@ -1,8 +1,9 @@
 # Session Handoff
 
-Current state and the next move. Updated 2026-07-30, after natural-language
-search Phase 4 closed — its compiler, parser and independent durable budget are
-complete, but there is still no route or UI.
+Current state and the next move. Updated 2026-07-31, after natural-language
+search **Phase 5** closed — the plan is complete end to end: a sentence typed
+into the running app reaches the right recipes, and says what it gave up to get
+there.
 
 This file is **not** a history — it holds only what still constrains the code.
 `progress/PLAN.md` is the archive: every amendment (A1–A22), why each decision
@@ -21,7 +22,8 @@ carried over.
 in [`plans/FILTER_PLAN.md`](./plans/FILTER_PLAN.md) and the log is
 [`progress/FILTER_PLAN.md`](./progress/FILTER_PLAN.md), amendments from A23.
 
-**Its Phases 1 through 4 are complete (2026-07-30) on branch `filters`.**
+**All five of its phases are complete** — 1 through 4 on 2026-07-30 and Phase 5
+on 2026-07-31, on branch `filters`.
 
 Phase 1 moved the OpenRouter transport into `packages/shared/src/llm/` behind
 the server-only `@recipes/shared/llm` subpath, as 100%-similarity renames with
@@ -58,10 +60,16 @@ day-rolling search accumulator is `success` from creation, `/ops` labels it
 measured production-shaped searches, not thousands. The suite went 827 →
 **836**.
 
-**Next is Phase 5** — `GET /api/search`, its 90%/503 gate, the signed-in search
-bar and URL state. There is still no search route or search UI.
+Phase 5 shipped `GET /api/search` (401 / 400 / 503 / 200), the orchestration in
+`apps/web/src/lib/search-service.ts`, the notice contract in
+`@recipes/shared/search`, the signed-in search bar and `?q=` URL state. The
+example query returns the same 12 recipes through the running app; the URL is
+shareable, one back press restores a previous query, and all four notices plus
+the disabled state were seen in a browser. The full account is in the progress
+log's Phase 5 section — read that before changing any of it.
 
-The options below remain open and unstarted; none of them blocks the search work:
+**There is no next phase in this plan.** The options below are open and
+unstarted:
 
 | Option | What it is |
 | --- | --- |
@@ -164,22 +172,28 @@ off a screenshot are the correct ones to pass back.
   `saved_recipes`, **0** `grocery_checks`, **0** `cook_logs`, **0**
   `user_preferences`, **0** `recipe_scores` — every probe row from Phases 4
   through 7 was removed.
-- **0 `kind='search'` scan rows** — Phase 4's synthetic two-kind live probe was
-  removed after `/ops` displayed its label and cost.
-- OpenRouter spend to date ≈ **$0.70** — the prior ≈ $0.43 plus the 1,000-case
-  stress run at an estimated $0.27187. The stress run used
+- **1 `kind='search'` scan row**, for 2026-07-31, at **$0.006970** over 49,616
+  in / 3,486 out. That is the Phase 5 browser check's real spend, and it is the
+  UTC day's accumulator — left in place deliberately, because it records money
+  that was actually spent and is what the daily budget reads.
+- OpenRouter spend to date ≈ **$0.71** — the prior ≈ $0.70 plus Phase 5's ≈
+  $0.008 of live searches. The 1,000-case stress run used
   `SEARCH_DAILY_BUDGET_USD=5` only on its `docker compose exec` process; the
   repository default and `.env` remain unchanged.
+- A search costs **$0.00057–0.00064** measured through the real route, which is
+  exactly Phase 3's estimate — about **160–175 searches per UTC day** at the
+  `$0.10` default.
 
-Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **1,806
-passing** (shared 171, db 20, worker 1,539, web 76); the worker typecheck is
-clean;
-production build clean; all four secrets absent from `apps/web/.next/static`;
-`/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file`,
-`POST /api/grocery`, `GET/POST /api/ratings`, `DELETE /api/ratings/:id` and
-`GET/PATCH /api/preferences/rules` all respond correctly with the Compose stack
-up. Signed out, `/api/recipes` returns all 235 active recipes with every `score`
-null, and `/api/preferences/rules` is a 401.
+Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **1,832
+passing** (shared 181, db 20, worker 1,539, web 92); all four typechecks clean;
+production build clean; all four secrets absent from `apps/web/.next/static`,
+and so are `OpenAI`, `openrouter.ai`, `createOpenRouterClient` and
+`StructuredOutputError`; `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`,
+`/api/images/:file`, `POST /api/grocery`, `GET/POST /api/ratings`,
+`DELETE /api/ratings/:id`, `GET/PATCH /api/preferences/rules` and
+`GET /api/search` all respond correctly with the Compose stack up. Signed out,
+`/api/recipes` returns all 235 active recipes with every `score` null, and both
+`/api/preferences/rules` and `/api/search?q=…` are 401.
 
 The production build needs `DATABASE_URL` in its environment — `/api/health`
 imports `@recipes/shared/env` at module scope, so `next build` fails at "collect
@@ -187,9 +201,17 @@ page data" without it. That is pre-existing and not a regression.
 
 Driven live in a browser, signed in through a temporary local
 `DEV_AUTH_FALLBACK=true` (reverted after; recipe above): the Phase 6 ratings
-flow, the Phase 5 grocery tab both signed in and signed out, the Phase 7 rules
-panel, and the full Phase 7 loop — three derived rules took browse from 235 to
-74, in strict score order from 100 down to 10, every card carrying its reason.
+flow, the `PLAN.md` Phase 5 grocery tab both signed in and signed out, the Phase
+7 rules panel, and the full Phase 7 loop — three derived rules took browse from
+235 to 74, in strict score order from 100 down to 10, every card carrying its
+reason.
+
+And, on 2026-07-31, all of `FILTER_PLAN.md` Phase 5: the example query returning
+its 12 recipes from a typed sentence, a shareable `?q=` URL, one back press
+restoring a previous query with its results and notices, chips narrowing within
+results (91 → 25) and resetting to *All* on a new search, all four notices on
+screen, and the bar rendered disabled-with-an-explanation at the 90% gate while
+browse carried on working.
 
 ---
 
@@ -197,7 +219,7 @@ panel, and the full Phase 7 loop — three derived rules took browse from 235 to
 
 Each one has a plausible-looking wrong version, and most fail silently.
 
-### Search (FILTER_PLAN Phases 2–4, A27, A28, A32, A33)
+### Search (FILTER_PLAN Phases 2–5, A27, A28, A32, A33, A35–A38)
 
 - **Time compiles to `total_minutes`, never to the `Under 20 min` tag.** 12
   recipes carry the tag; 34 satisfy the column. Trusting the tag silently loses
@@ -256,6 +278,44 @@ Each one has a plausible-looking wrong version, and most fail silently.
   `scripts/check-search-parse.ts` opens no `scan_runs` row by design; routing it
   through the budget would let a diagnostic consume the next day's search
   allowance.
+- **The parse prompt lives in `@recipes/shared/llm`, not the worker** (A35).
+  It is the only task prompt that does, because its only caller is the web
+  route and `apps/web` must not import `@recipes/worker`. It inherits the
+  subpath's rule — server-only, absent from the package barrel — and the
+  worker's `src/llm` barrel re-exports it, so anything addressing it through
+  that barrel already works. Do not move it back.
+- **The bundle-leak grep is no longer free.** `apps/web` now has a real LLM
+  caller, so a production build plus a grep of `apps/web/.next/static` for
+  `OpenAI`, `openrouter.ai`, `createOpenRouterClient` and
+  `StructuredOutputError` is a check to actually run, not a formality. It was
+  clean at the Phase 5 exit over 35 files.
+- **The search is never run server-side.** `page.tsx` reads `?q=` and passes the
+  string down; the client runs it once and caches it forever. A search is a
+  billable call, and a crawler, a link preview or a reload each paying for one
+  is not something to find out about from a bill.
+- **`?q=` is written with `pushState`, and the push is outside the state
+  updater** (A37). React calls a `setState` updater more than once — twice under
+  StrictMode in development — so a `pushState` inside one pushed two identical
+  history entries and leaving a query took two back presses. `router.push` was
+  rejected separately: the page is `force-dynamic`, so it would re-run the whole
+  server render to change a string the component already holds.
+- **A notice the reader is not shown is worse than an empty state.** All four —
+  §4.2's bypassed rules, §4.4's relaxations, §5.1's union and A26's degraded
+  parse — are assembled by one pure `searchNoticesFor()` in
+  `@recipes/shared/search`, because the assembly step is where one gets
+  silently dropped. Add a fifth there, with a fixture, not in the route.
+- **A26's text fallback must drop English stopwords, and asks Postgres which
+  they are** (A38). `plainto_tsquery('english','with')` is the *empty* query and
+  `@@` against it is false, so one surviving "with" makes the whole conjunction
+  unsatisfiable however good the other terms are. `numnode(...) > 0` is the
+  filter. Do not reimplement the stopword list in TypeScript.
+- **A route module may only export handlers and Next's own config fields.**
+  `next build` type-checks this and fails on anything else — an exported message
+  constant is enough to break the build while `tsc` stays clean.
+- **`scan_runs.cost_usd` is `numeric(12,6)`.** A JS product like `0.1 × 0.9`
+  rounds on the way in and reads back below the number it was written as, so the
+  90% gate cannot be tested exactly on its boundary. Real spend arrives in
+  ~$0.00057 steps and crosses it within one search either way.
 - **`SEARCH_VOCAB_VERSION` is meant to break the build** (A25, A27). It is
   derived from `CATEGORIES` and `TAGS` and pinned literally in
   `packages/shared/test/search.test.ts` *and* in

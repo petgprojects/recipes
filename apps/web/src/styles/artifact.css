@@ -366,6 +366,7 @@
   .mp-tabs,
   .mp-chips,
   .mp-pill,
+  .mp-search,
   .mp-grid,
   .mp-note,
   .mp-rules,
@@ -496,3 +497,54 @@
   font-size: 12.5px; line-height: 1.45; color: var(--leaf);
 }
 .mp-card-why-mark { flex: 0 0 auto; font-size: 11px; }
+
+/* ---------------------------------------------------------------- *
+ *  FILTER_PLAN Phase 5. The search bar, and the notices under it.
+ *  §8: at the budget gate the bar is *disabled with an explanation*,
+ *  never hidden — "a control that vanishes reads as a bug". So the
+ *  disabled state below still occupies the same space and still
+ *  looks like the thing it is, just visibly inert.
+ * ---------------------------------------------------------------- */
+.mp-search { margin-bottom: 14px; }
+.mp-search-form { display: flex; gap: 8px; align-items: stretch; }
+.mp-search-input {
+  flex: 1 1 auto; min-width: 0;
+  padding: 11px 14px; border-radius: 999px;
+  border: 1.5px solid var(--line); background: var(--paper);
+  font-family: var(--body); font-size: 14px; color: var(--slate);
+  -webkit-appearance: none; appearance: none;
+}
+.mp-search-input::placeholder { color: #A8949C; }
+.mp-search-input:focus-visible { outline: 2px solid var(--leaf); outline-offset: 1px; }
+.mp-search-go {
+  flex: 0 0 auto; padding: 11px 18px; border-radius: 999px;
+  border: 1.5px solid var(--beet); background: var(--beet); color: #FFF7FA;
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: .09em;
+  text-transform: uppercase; white-space: nowrap;
+}
+/* Inert, not absent. Both controls stay legible and stay in the layout. */
+.mp-search-input:disabled { background: var(--blush); color: #A8949C; }
+.mp-search-go:disabled { opacity: .45; }
+
+.mp-search-state {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin: 10px 2px 0;
+}
+.mp-search-for { font-size: 12.5px; line-height: 1.5; color: var(--beet-soft); }
+.mp-search-clear {
+  flex: 0 0 auto; padding: 4px 11px; border-radius: 999px;
+  border: 1.5px solid var(--line); background: transparent;
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--beet-soft);
+}
+.mp-search-note { font-size: 12.5px; line-height: 1.5; color: var(--beet-soft); margin: 10px 2px 0; }
+
+/* §4.2, §4.4, §5.1 and A26. Each of these is the app admitting that the
+   results are not quite the question, so they read as the app's own voice —
+   the same aside styling as a score's reason on a card, not as an error. */
+.mp-search-notices { list-style: none; padding: 0; margin: 10px 0 0; }
+.mp-search-notice {
+  margin-top: 6px; padding: 8px 10px;
+  background: var(--leaf-soft); border-radius: 8px;
+  font-size: 12.5px; line-height: 1.45; color: var(--leaf);
+}

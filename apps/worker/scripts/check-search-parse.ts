@@ -31,10 +31,10 @@ import { env, requireEnv } from '@recipes/shared/env';
 import {
   addLlmUsage,
   createOpenRouterClient,
+  parseSearchQuery,
   type LlmUsage,
   type StructuredOutputClient,
 } from '../src/llm';
-import { parseSearchQuery } from '../src/llm/parse-search-query';
 import {
   FIXTURE_INGREDIENT_VOCABULARY,
   GROUPING_PROBES,

@@ -44,6 +44,8 @@ import {
 } from '@recipes/db';
 import {
   isEmptySearchFilter,
+  type RelaxableField,
+  type Relaxation,
   type SearchFilter,
 } from '@recipes/shared/search';
 import {
@@ -94,22 +96,16 @@ function ftsDocument(): SQL {
 // ── Criteria ────────────────────────────────────────────────────────────────
 
 /**
- * The fields the relaxation ladder is allowed to touch (§4.4).
+ * `RelaxableField` and `Relaxation` are `@recipes/shared/search`'s, not this
+ * module's, and re-exported here so the compiler's callers keep one import.
  *
- * `ingredients` and every `exclude*` field are deliberately absent and must
- * stay absent: returning mushroom recipes to someone who said "no mushrooms"
- * because nothing else matched is worse than returning nothing.
+ * They moved out in Phase 5 because the browser has to render what was given
+ * up (§4.4: "say what was dropped"), and a type describing a notice cannot live
+ * in a module that imports the database. What stays here is the ladder itself —
+ * *which* field goes first and by how much a bound widens — because that is a
+ * property of the query, not of the sentence about it.
  */
-export type RelaxableField =
-  | 'minKeepsDays'
-  | 'freezerOnly'
-  | 'minServings'
-  | 'anyTags'
-  | 'maxMinutes'
-  | 'minMinutes'
-  | 'maxActiveMinutes'
-  | 'tags'
-  | 'categories';
+export type { RelaxableField, Relaxation } from '@recipes/shared/search';
 
 /** Every criterion a filter can contribute, for `match_count` and the `WHERE`. */
 type CriterionKey = RelaxableField | 'excludeCategories' | 'excludeTags' | 'ingredients' | 'excludeIngredients' | `term:${string}`;
@@ -300,12 +296,6 @@ const RELAXATION_LADDER: readonly (readonly RelaxableField[])[] = [
   ['tags'],
   ['categories'],
 ];
-
-export type Relaxation =
-  | { kind: 'dropped'; field: RelaxableField }
-  | { kind: 'widened'; field: 'maxMinutes' | 'minMinutes' | 'maxActiveMinutes'; from: number; to: number }
-  /** §5.1's union fallback, which runs before the ladder. */
-  | { kind: 'unmapped-union'; terms: string[] };
 
 /** Whether a field is set at all, so an empty rung can be skipped. */
 function isSet(filter: SearchFilter, field: RelaxableField): boolean {

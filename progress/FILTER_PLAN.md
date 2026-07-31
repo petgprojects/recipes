@@ -28,14 +28,15 @@ configured and is the only credential this plan needs.
 | 2 — `SearchFilter` contract, compiler, migration `0004_search.sql` | ✅ complete — 2026-07-30 |
 | 3 — The parse step and its fixtures | ✅ complete — 2026-07-30 |
 | 4 — Budget, accounting, `/ops` labelling | ✅ complete — 2026-07-30 |
-| 5 — `/api/search`, search bar, URL state | ⬜ not started |
+| 5 — `/api/search`, search bar, URL state | ✅ complete — 2026-07-31 |
 
-Exit criteria for each are in `plans/FILTER_PLAN.md` §7. Verification baseline
-after the stress extension: **1,806 tests passing** (shared 171, db 20, worker
-1,539, web 76),
-clean typecheck, passing production build. It was 712 at the Phase 7 checkpoint
-and at the end of Phase 1; Phase 2 added 50, Phase 3 added 65 and Phase 4 added
-9, without changing an existing assertion.
+**All five phases are complete.** Exit criteria for each are in
+`plans/FILTER_PLAN.md` §7. Verification baseline after Phase 5: **1,832 tests
+passing** (shared 181, db 20, worker 1,539, web 92), clean typecheck, passing
+production build. It was 712 at the Phase 7 checkpoint and at the end of Phase
+1; Phase 2 added 50, Phase 3 added 65, Phase 4 added 9, the stress extension
+took it to 1,806 and Phase 5 added 26 — none of them changing an existing
+assertion.
 
 ---
 
@@ -497,6 +498,180 @@ day's user-facing search budget; no prompt or fixture changed.
 
 ---
 
+## Phase 5 — Route and UI ✅
+
+`GET /api/search` (`apps/web/src/app/api/search/route.ts`), the orchestration
+behind it (`apps/web/src/lib/search-service.ts`), the notice contract and its
+copy (`packages/shared/src/search.ts`), the bar
+(`apps/web/src/components/search-bar.tsx`), the planner's `?q=` state and the
+server render that seeds it.
+
+**Exit criterion met, in the browser.** Typing
+
+> Recipes that take less than 20 minutes and have lots of protein, and are easy
+> to make
+
+into the running app returns **exactly the 12 recipes §1 names**. The live model
+produced `{"maxMinutes":20,"tags":["High protein"],"anyTags":["Hands-off","One
+pot","One cleanup","Sheet pan","No cook"]}` — byte-identical to the hand-authored
+`EXAMPLE_QUERY_FILTER` — with zero relaxations, in about 4.4 seconds and
+$0.00064. The URL became
+`/?q=Recipes%20that%20take%20less%20than%2020%20minutes…`, a reload of that URL
+renders the query already in the box, and **one** back press restores a previous
+query, its input text, its results and its notices with no second provider call.
+
+**All four notice paths were seen on screen**, not asserted:
+
+| Notice | How it was produced | What it said |
+|---|---|---|
+| §4.2 rules bypassed | `dev@local` given `max_minutes:30` and `exclude_category:Soup` | *Ignoring your “under 30 minutes” and “no Soup” rules for this search.* |
+| §4.4 relaxed | "a vegan soup I can make in 10 minutes" | widened 10 → 15 minutes and dropped `tags`; **1 recipe instead of none** |
+| §5.1 union | "something creamy and crispy" | *Nothing matched both “creamy” and “crispy”. Showing recipes that match one.* — 33 rows |
+| A26 degraded | `OPENROUTER_MODEL` temporarily pointed at a model that does not exist | *Search understanding is down; showing text matches.* — 74 rows, not a 500 |
+
+The §4.2 case is the one worth keeping: the reader's standing rule says *no
+Soup*, they asked for soup, and search gave them soup **and told them which rule
+it stepped over**. That is the whole argument of §4.2 in one screenshot.
+
+**The disabled state was seen too.** With the day's search accumulator pushed
+past 90% of `SEARCH_DAILY_BUDGET_USD`, the page renders the bar in place, both
+controls inert, the placeholder reading *Search is resting until tomorrow*, and
+an explanation underneath — while browse and the category chips carry on
+working. `GET /api/search` answers **503** with the same sentence and **spends
+nothing**: the gate is checked before a provider is ever constructed.
+
+Status codes verified end to end: **401** signed out, **400** on a missing or
+empty `q` and on 301 characters, **503** at the gate, **200** otherwise. The
+400-before-401 ordering matches the ratings route's documented behaviour and is
+deliberate — a malformed request never reaches a billable call.
+
+Accounting: one `kind='search'` row for the UTC day, `success`, `finished_at`
+advancing per search, and `/ops` labelling it **Search** at `$0.0070` over
+49,616 in / 3,486 out. The scan pot never moved.
+
+1,832 tests pass (up 26), all four typechecks are clean, the production build
+passes, and `apps/web/.next/static` (35 files) greps clean for `openrouter.ai`,
+`OpenAI`, `createOpenRouterClient` and `StructuredOutputError` — **the check
+Phase 1 said would stop being free once `apps/web` had a real caller.** It now
+has one, and it is still clean.
+
+### The plan said the prompt module stays in the worker; it could not
+
+§2.2 puts every task prompt in `apps/worker/src/llm/` *and* rejects having
+`apps/web` import `@recipes/worker`. Those two are compatible for every other
+prompt and incompatible for this one, whose only caller is a web route. So
+`parse-search-query.ts` moved to `packages/shared/src/llm/`, as a 100%-similarity
+rename with its imports rewritten from `@recipes/shared/*` to relative paths
+(amendment A35). The worker's `src/llm/index.ts` already re-exported
+`@recipes/shared/llm` whole, so the fixtures, the offline suite and the check
+script were unaffected apart from one import line in the script. No assertion
+changed and the worker's 1,539 tests were the same before and after.
+
+### Decisions
+
+**A notice is a contract, not a sentence built in the route (A36).** `SearchNotice`,
+`searchNoticesFor()` and `describeSearchNotice()` live in the client-safe
+`@recipes/shared/search`, in the same split as `HardRule`/`describeHardRule()`.
+The reason is that the assembly step is where a notice gets *dropped*, and a
+dropped notice is invisible — the reader sees a plausible list of recipes and no
+reason to doubt it. As a pure function it is pinned by twelve offline
+assertions instead of by a browser.
+
+**`?q=` is written with the native History API, not `router.push` (A37).** The
+page is `force-dynamic`, so a router push would re-run the whole server render —
+a second browse query and a second session lookup — to change a string the
+component already holds. `pushState` plus a `popstate` listener keeps it a
+client-side transition and still gives a shareable URL and a working back
+button, which is all §7 asks for.
+
+**The search itself never runs server-side.** `page.tsx` reads `?q=` and passes
+it down; the client runs the query once and caches it forever
+(`staleTime: Infinity`, no retry, no refetch on focus). A search is a billable
+call, and a crawler, a link preview or a reload each paying for one is not a
+thing to discover later.
+
+**Availability is read on the server render.** §8 wants the bar disabled *with
+an explanation*, which means the first paint has to know — a reader who learns
+that search is resting by typing a query and getting a 503 has been told by an
+error message. It is one `sum()` over the day's `scan_runs`, and only for a
+signed-in reader.
+
+**A26's fallback asks Postgres which words are stopwords (A38).** The degraded
+path word-splits the raw query so §5.1's union fallback can widen it. But
+`plainto_tsquery('english', 'with')` is the **empty** query and `@@` against an
+empty query is *false*, so a single surviving "with" makes the whole conjunction
+unsatisfiable however good the other terms are. `numnode(...) > 0` filters those
+out. Reimplementing Postgres' stopword list in TypeScript was rejected for the
+grocery list's reason: two copies of one vocabulary in two languages drift, and
+the symptom is wrong output nobody can see is wrong.
+
+### Two bugs the browser check found, which no test would have
+
+Both are exactly the class `plans/FILTER_PLAN.md` §7 predicts: "these are the
+failures tests do not catch."
+
+- **`pushState` was called inside a `setState` updater**, so React — which calls
+  an updater more than once, twice under StrictMode in development — pushed two
+  identical history entries per search, and leaving a query took two back
+  presses. Moved out of the updater; verified afterwards that one search adds
+  exactly one history entry (8 → 9) and one back press restores the previous
+  query.
+- **"Nothing matched both “creamy”, “chicken” and “pasta”."** The §5.1 example
+  has two terms and reads beautifully; three does not. It says *all of* past
+  two now, with a fixture for it.
+
+### Corrections to the plan
+
+**§5.1's example copy describes something the compiler does not do.** It reads
+"Nothing matched both 'spicy' and under 20 minutes" — but the union fallback
+ORs the unmapped terms *among themselves* and keeps every structured criterion
+ANDed. A time bound is never relaxed into a disjunction. The shipped sentence
+names only the terms, which is what actually happened.
+
+**§4.4's example copy is query-specific and cannot be reproduced.** "No
+15-minute vegan soups. Showing 30-minute ones." requires knowing the search was
+for vegan soups; the compiler knows only that it widened a bound. The shape is
+kept — what failed, then what is on screen instead — and the specifics come from
+the relaxation, which is the part that is true every time.
+
+**§8's 503 message could not be exported from the route module.** `next build`
+type-checks route files against a fixed set of allowed exports and fails on
+anything else. The constant is module-local; the bar renders its own copy of the
+sentence from `searchAvailable` rather than reading it off an error, so the two
+only have to agree on English.
+
+### Traps worth recording
+
+- **`scan_runs.cost_usd` is `numeric(12,6)`.** A JavaScript product like
+  `0.1 × 0.9 = 0.09000000000000001` rounds to `0.090000` on the way in and reads
+  back *below* the number it was written as, so a test that sits exactly on the
+  90% boundary tests float representation rather than the gate. Real spend
+  arrives in ~$0.00057 steps and crosses it within one search either way.
+- **The worker rewrites `hard_rules` when it restarts.** It bind-mounts the repo
+  under `tsx watch`, so editing a shared source file restarts it, which runs a
+  bootstrap enrichment job, which enqueues a personalization pass, which
+  re-derives rules and merges. Two hand-inserted probe rules vanished mid-check
+  that way. Insert probe rules *after* the last source edit.
+- **Postgres and JavaScript sort differently.** The ingredient vocabulary is
+  sorted in JS for a byte-stable payload; the database's collation puts
+  `black eyed peas` before `blackberries` where a codepoint sort does the
+  opposite. Comparing the two orders tests the collation.
+- **A key press dispatched over CDP does not perform implicit form submission.**
+  Return in a focused `<input>` inside a `<form>` did nothing; `requestSubmit()`
+  worked immediately. The app is fine — this is the same class of tooling
+  artefact as `HANDOFF.md`'s note about clicks landing before hydration.
+
+### What it cost
+
+About **$0.008** across the whole live check — roughly a dozen searches at
+**$0.00057–0.00064** each, which lands exactly on Phase 3's measurement. The
+day's `kind='search'` accumulator ended at `$0.006970` and was left in place: it
+records real spend and is what the daily budget reads. Every probe
+`user_preferences` row was deleted; `saved_recipes`, `grocery_checks`,
+`cook_logs` and `recipe_scores` are all back at zero.
+
+---
+
 ## Stress evaluation — complete — 2026-07-30
 
 The original 30 hand-authored parse fixtures remain as regression anchors. The
@@ -613,13 +788,52 @@ lock would only make a search wait behind enrichment. Same-kind requests still
 serialize from preflight through the durable write, and tests prove cross-kind
 preflights do not block.
 
-**A34 — The 30-case parse check has a 1,000-case stress extension.** The
+**A34 — The 30-case parse check has a 1,000-case stress extension.** (continued
+below; the four after it were settled during Phase 5.) The
 original 30 remain the hand-authored, plan-level regression anchors. The added
 matrix is generated from real corpus vocabularies so it can cover many natural
 phrases without maintaining a thousand nearly identical blocks by hand. Its
 live diagnostic uses the Phase 5 90% gate, caps mismatch detail, and remains
 outside durable search-budget accounting; a one-off budget override must be
 scoped to the command that launches it.
+
+The four below were settled during Phase 5, three of them by the package
+boundary and one by the browser.
+
+**A35 — The parse step is the one task prompt in `@recipes/shared/llm`.**
+§2.2 says every task prompt stays in the worker *and* that `apps/web` must not
+import `@recipes/worker`; for `parse-search-query.ts`, whose only caller is the
+web search route, those two cannot both hold. It moved, as a 100%-similarity
+rename with relative imports — the same move Phase 1 made with the transport,
+for the same reason, inheriting the same rule: server-only, absent from the
+package barrel. The worker's `src/llm` barrel already re-exported the subpath
+whole, so nothing addressing it through the barrel changed.
+
+**A36 — A notice is a contract, not prose assembled in the route.**
+`SearchNotice`, `searchNoticesFor()` and `describeSearchNotice()` live in the
+client-safe `@recipes/shared/search`, in the `HardRule`/`describeHardRule()`
+split. The assembly step is where a notice gets dropped, and a dropped notice is
+invisible — the reader sees a plausible list and no reason to doubt it — so it
+is a pure function with offline assertions rather than something only a browser
+can check. Consequence: the plan's example sentences in §4.4 and §5.1 are
+query-specific and could not be reproduced literally; the shape is kept and the
+specifics come from the relaxation, which is what is true every time.
+
+**A37 — `?q=` is native History API state, not `router.push`.** The page is
+`force-dynamic`, so a router push would re-run the whole server render — a
+second browse query and a second session lookup — to change a string the
+component already holds. `pushState` plus a `popstate` listener is a client-side
+transition and still satisfies §7's shareable URL and working back button. The
+push must sit *outside* the `setState` updater: React calls an updater more than
+once, and inside it one search pushed two history entries.
+
+**A38 — A26's text fallback asks Postgres which words are stopwords.**
+`plainto_tsquery('english', 'with')` is the empty query and `@@` against an
+empty query is false, so one stopword surviving into the term list makes the
+whole conjunction unsatisfiable however good the other terms are.
+`numnode(...) > 0` filters them out. A TypeScript copy of the stopword list was
+rejected for the grocery list's reason: two copies of one vocabulary in two
+languages drift, and the symptom is wrong output nobody can see is wrong.
 
 ---
 

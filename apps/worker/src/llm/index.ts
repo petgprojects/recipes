@@ -12,4 +12,8 @@ export * from './extract-recipe-from-post';
 export * from './map-ingredients';
 export * from './taste-profile';
 export * from './score-recipes';
-export * from './parse-search-query';
+// `parse-search-query` is deliberately absent: it moved to `@recipes/shared/llm`
+// so the web search route could call it (amendment A35), and the first line of
+// this file already re-exports that subpath whole. Everything addressing it
+// through this barrel — the fixtures, the suite, the check script — is
+// unaffected.

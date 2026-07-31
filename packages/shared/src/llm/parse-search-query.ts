@@ -8,10 +8,22 @@
  * else, because `searchFilterSchema` is what goes to the provider as a strict
  * `json_schema` and what the response is parsed with on the way back.
  *
- * The closest existing task is `./score-recipes.ts`: it also takes the reader's
- * Phase 7 prose profile as an input, and the untrusted-data wording here is
- * theirs verbatim. One direct, stateless structured-output call. No agent loop,
- * and no `emit_recipe` tool workaround (PLAN.md §3, amendment A2).
+ * The closest existing task is `apps/worker/src/llm/score-recipes.ts`: it also
+ * takes the reader's Phase 7 prose profile as an input, and the untrusted-data
+ * wording here is theirs verbatim. One direct, stateless structured-output
+ * call. No agent loop, and no `emit_recipe` tool workaround (PLAN.md §3,
+ * amendment A2).
+ *
+ * **This is the one task prompt that does not live in the worker** (amendment
+ * A35). §2.2 puts every other one there and is explicit that `apps/web` must
+ * not import `@recipes/worker` — the worker's package entry boots cron and
+ * queues, and a web request has no business pulling that in. But its only
+ * caller is `apps/web/src/app/api/search/route.ts`, so one of the two had to
+ * move, and this module already imported nothing but `@recipes/shared`. It is
+ * the same move Phase 1 made with the transport, for the same reason, and it
+ * inherits the same rule: **server-only, absent from the package barrel.** The
+ * worker still reaches it through its own `src/llm` barrel, which re-exports
+ * this subpath whole.
  *
  * Three things here are easy to get wrong and silent when you do.
  *
@@ -32,19 +44,19 @@
  */
 
 import { z } from 'zod';
-import { MAX_PROFILE_CHARS } from '@recipes/shared/personalization';
+import { MAX_PROFILE_CHARS } from '../personalization';
 import {
   MAX_SEARCH_QUERY_CHARS,
   MAX_TERM_CHARS,
   TIME_TAGS,
   searchFilterSchema,
   type SearchFilter,
-} from '@recipes/shared/search';
-import { CATEGORIES, TAGS, type Tag } from '@recipes/shared';
+} from '../search';
+import { CATEGORIES, TAGS, type Tag } from '../vocab';
 import type {
   StructuredOutputCallOptions,
   StructuredOutputClient,
-} from '@recipes/shared/llm';
+} from './openrouter';
 
 /**
  * A ceiling on the supplied canonical vocabulary, not a target.

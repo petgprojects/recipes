@@ -22,9 +22,11 @@ import { countGroceryItems } from '@recipes/shared/grocery';
 import type { PlannerState } from '@recipes/shared/planner';
 import type { HardRule } from '@recipes/shared/personalization';
 import {
+  ApiError,
   useGroceryQuery,
   useRecipesQuery,
   useSavedRecipeDetails,
+  useSearchQuery,
   type GroceryPick,
 } from '@/lib/api';
 import { usePlannerStore, type PlannerUser } from '@/lib/saved-store';
@@ -35,6 +37,7 @@ import { HardRules } from './hard-rules';
 import { PicksList } from './picks-list';
 import { RecipeCard } from './recipe-card';
 import { RecipeSheet } from './recipe-sheet';
+import { SearchBar } from './search-bar';
 
 type Tab = 'browse' | 'picks' | 'list';
 
@@ -57,6 +60,14 @@ interface PlannerProps {
   initialHardRules?: HardRule[];
   /** Whether Google sign-in is configured at all (Phase 4 secrets present). */
   authEnabled: boolean;
+  /**
+   * `?q=` as the server saw it, so a shared link renders with its query already
+   * in the box (FILTER_PLAN.md §7, Phase 5). The search itself still runs on
+   * the client — it is a billable call and the server render must not make one.
+   */
+  initialQuery?: string;
+  /** False at the §8 budget gate: the bar renders disabled, never hidden. */
+  searchAvailable?: boolean;
 }
 
 export function Planner({
@@ -65,11 +76,14 @@ export function Planner({
   initialPlannerState,
   initialHardRules = [],
   authEnabled,
+  initialQuery = '',
+  searchAvailable = false,
 }: PlannerProps) {
   const [tab, setTab] = useState<Tab>('browse');
   const [category, setCategory] = useState<string>(CATEGORY_FILTER_ALL);
   const [openId, setOpenId] = useState<string | null>(null);
   const [shown, setShown] = useState<RecipeSummary[]>(initialRecipes);
+  const [query, setQuery] = useState<string>(initialQuery);
 
   const store = usePlannerStore(user, initialPlannerState);
   const { data: live, isError, error, isFetching } = useRecipesQuery(initialRecipes);
@@ -84,6 +98,51 @@ export function Planner({
     setTab('browse');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [live]);
+
+  // ── Search (FILTER_PLAN Phase 5) ──────────────────────────────────────────
+  //
+  // `?q=` *is* the state. It is written with the native History API rather than
+  // `router.push`, which Next 15 supports and which keeps this a client-side
+  // transition: the page is `force-dynamic`, so a router push would re-run the
+  // whole server render — a second browse query and a second session lookup —
+  // to change a string this component already has. Shareable, because the URL
+  // carries it; back-button-safe, because `popstate` puts it back.
+  const searchQuery = useSearchQuery(query, user !== null);
+
+  const goToQuery = useCallback(
+    (next: string) => {
+      if (next === query) return;
+      // **Outside the state updater, deliberately.** `pushState` is a side
+      // effect, and React calls an updater function more than once — twice
+      // under StrictMode in development. Inside, one search pushed two
+      // identical history entries and the back button needed two presses to
+      // leave a query, which is exactly the kind of thing only a browser
+      // check finds.
+      window.history.pushState(
+        null,
+        '',
+        next === '' ? window.location.pathname : `?q=${encodeURIComponent(next)}`,
+      );
+      setQuery(next);
+      // A search answers a question the chips were narrowing, so the chips
+      // start over. Leaving "Soup" selected would silently hide most of the
+      // results and look like the search returning almost nothing.
+      setCategory(CATEGORY_FILTER_ALL);
+      setTab('browse');
+    },
+    [query],
+  );
+
+  const clearSearch = useCallback(() => goToQuery(''), [goToQuery]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      setQuery(new URLSearchParams(window.location.search).get('q')?.trim() ?? '');
+      setCategory(CATEGORY_FILTER_ALL);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   /**
    * Flipping a hard rule changes the feed, and that change must *not* arrive as
@@ -110,12 +169,21 @@ export function Planner({
   const savedIds = useMemo(() => Object.keys(store.saved), [store.saved]);
   const savedDetails = useSavedRecipeDetails(savedIds);
 
+  /**
+   * Search results are in here too, and they have to be: a result the browse
+   * feed is hiding — because a hard rule filtered it out, which §4.2 says a
+   * search deliberately ignores — is still openable, and the sheet resolves its
+   * recipe through this map.
+   */
   const byId = useMemo(() => {
     const map = new Map<string, RecipeSummary>();
     for (const recipe of live) map.set(recipe.id, recipe);
     for (const recipe of shown) if (!map.has(recipe.id)) map.set(recipe.id, recipe);
+    for (const recipe of searchQuery.data?.recipes ?? []) {
+      if (!map.has(recipe.id)) map.set(recipe.id, recipe);
+    }
     return map;
-  }, [live, shown]);
+  }, [live, shown, searchQuery.data]);
 
   /** A saved recipe may have left the browse feed; its detail still resolves. */
   const savedRecipes = useMemo(
@@ -141,12 +209,35 @@ export function Planner({
   const itemCount = countGroceryItems(groceries);
   const groceriesLoading = groceryQuery.isPending && groceryPicks.length > 0;
 
+  /**
+   * What the grid is a list of: the browse feed, or the search results.
+   *
+   * The chips narrow *within* whichever it is (§7, Phase 5), which is why this
+   * is one pipeline with two sources rather than two grids. While a search is
+   * in flight the source is empty rather than the browse feed — leaving the
+   * previous list under a "Searching…" label would read as the answer.
+   */
+  const searching = query !== '' && user !== null;
+  const source = searching ? (searchQuery.data?.recipes ?? []) : shown;
+
+  /**
+   * The §8 gate, from either direction.
+   *
+   * The server render already knows the budget at page load, so the bar is
+   * disabled before anyone types. A 503 arriving mid-session means the gate was
+   * crossed while this tab was open, and it has to disable the bar too — it is
+   * the same state, learned later.
+   */
+  const searchResting =
+    !searchAvailable ||
+    (searchQuery.error instanceof ApiError && searchQuery.error.status === 503);
+
   const visible = useMemo(
     () =>
       category === CATEGORY_FILTER_ALL
-        ? shown
-        : shown.filter((recipe) => recipe.category === category),
-    [shown, category],
+        ? source
+        : source.filter((recipe) => recipe.category === category),
+    [source, category],
   );
 
   const totalServings = savedRecipes.reduce(
@@ -201,7 +292,10 @@ export function Planner({
           </button>
         </nav>
 
-        {incoming.length > 0 && (
+        {/* Not while a search is on screen: the pill offers to replace the grid
+            with the browse feed, and it would be replacing the results someone
+            just asked for with a list they did not. */}
+        {incoming.length > 0 && !searching && (
           <button className="mp-pill" onClick={showIncoming}>
             {incoming.length} new {incoming.length === 1 ? 'recipe' : 'recipes'} — show{' '}
             {incoming.length === 1 ? 'it' : 'them'}
@@ -228,6 +322,25 @@ export function Planner({
 
         {tab === 'browse' && (
           <>
+            {/* Signed-in only (§8). Unlike the grocery list there is nothing to
+                migrate on a later sign-in, so this follows ratings: the
+                endpoint 401s and the control is not rendered at all. */}
+            {user !== null && (
+              <SearchBar
+                query={query}
+                available={!searchResting}
+                pending={searchQuery.isFetching}
+                notices={searchQuery.data?.notices ?? []}
+                resultCount={searchQuery.data?.recipes.length ?? null}
+                // Suppressed while resting: the bar already says why in its own
+                // words, and repeating it as a failure would make a budget the
+                // reader cannot see look like something that broke.
+                error={searchResting ? null : searchQuery.error}
+                onSearch={goToQuery}
+                onClear={clearSearch}
+              />
+            )}
+
             <HardRules
               signedIn={user !== null}
               initialRules={initialHardRules}
@@ -249,11 +362,21 @@ export function Planner({
 
             {visible.length === 0 ? (
               <div className="mp-empty">
-                <h3>Nothing here yet</h3>
+                {/* A search that found nothing is not an empty database, and
+                    §4.4's ladder has already been down two rungs by the time
+                    this renders — so this is the genuine empty state it ends
+                    with, and the notices above say what was tried. */}
+                <h3>{searching ? 'Nothing matched' : 'Nothing here yet'}</h3>
                 <p>
-                  {shown.length === 0
-                    ? 'No recipes have finished ingestion. Check /ops for the last scan.'
-                    : `No ${category.toLowerCase()} recipes have come through yet. The next scan may bring some.`}
+                  {searching
+                    ? searchQuery.isFetching
+                      ? 'Searching…'
+                      : source.length === 0
+                        ? 'No recipes match that, even after loosening it. Try fewer constraints, or a different ingredient.'
+                        : `Nothing in ${category.toLowerCase()} matched. The other chips still have results.`
+                    : shown.length === 0
+                      ? 'No recipes have finished ingestion. Check /ops for the last scan.'
+                      : `No ${category.toLowerCase()} recipes have come through yet. The next scan may bring some.`}
                 </p>
               </div>
             ) : (
@@ -270,9 +393,16 @@ export function Planner({
                 ))}
               </div>
             )}
-            <p className="mp-note" aria-live="polite">
-              {isFetching ? 'Checking for new recipes…' : 'Checks for new recipes every few minutes.'}
-            </p>
+            {/* The poller is still running underneath a search, but saying so
+                under a list it did not produce would claim the results are
+                being kept fresh. They are a snapshot of one query. */}
+            {!searching && (
+              <p className="mp-note" aria-live="polite">
+                {isFetching
+                  ? 'Checking for new recipes…'
+                  : 'Checks for new recipes every few minutes.'}
+              </p>
+            )}
           </>
         )}
 

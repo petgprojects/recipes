@@ -15,3 +15,6 @@
 
 export * from './openrouter';
 export * from './usage';
+// The one task prompt that lives here rather than in the worker, because its
+// caller is the web search route (amendment A35; see the file's own header).
+export * from './parse-search-query';

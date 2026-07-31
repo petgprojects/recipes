@@ -16,7 +16,7 @@ checkpoint, read documents in this order:
 | Plan | Log | State |
 |---|---|---|
 | `plans/PLAN.md` | `progress/PLAN.md` | ✅ complete — Phases 0–7, amendments A1–A22 |
-| `plans/FILTER_PLAN.md` | `progress/FILTER_PLAN.md` | 🔨 current — NL search, Phases 1–4 done, amendments A23–A33 |
+| `plans/FILTER_PLAN.md` | `progress/FILTER_PLAN.md` | ✅ complete — NL search, Phases 1–5, amendments A23–A38 |
 
 Amendment numbering is continuous across plans, so "amendment A18" resolves to
 exactly one document. Inline `PLAN.md §4` citations in source comments refer to
@@ -27,18 +27,22 @@ Do not restart completed phases or re-research facts already recorded there.
 
 ## Current checkpoint
 
-- **`PLAN.md` Phases 0–7 are complete**, and `FILTER_PLAN.md` Phases 1–4 are
-  too. Nothing is half-finished; the next move is that plan's **Phase 5**,
-  route and UI.
-- **Natural-language search parses and compiles, but nothing calls it yet.**
-  `@recipes/shared/search` owns the `SearchFilter` contract,
-  `apps/worker/src/llm/parse-search-query.ts` produces one from a sentence, and
-  `apps/web/src/lib/search.ts` compiles it into SQL with the relaxation ladder
-  and `searchRecipes()`. There is no route and no UI. Two rules govern every
-  change to it, both in `HANDOFF.md` in full: time compiles to `total_minutes`
-  and never the `Under 20 min` tag, and the null convention is **inverted** from
-  `hardRuleFilter()` — a typed requirement drops null rows, an exclusion does
-  not fire on them.
+- **`PLAN.md` Phases 0–7 and `FILTER_PLAN.md` Phases 1–5 are all complete.**
+  Nothing is half-finished and no phase is queued; `HANDOFF.md` lists the open
+  options.
+- **Natural-language search works end to end.** `@recipes/shared/search` owns
+  the `SearchFilter` contract, the notice contract and their copy;
+  `packages/shared/src/llm/parse-search-query.ts` produces a filter from a
+  sentence (it lives in shared, not the worker, because the web route is its
+  only caller — amendment A35); `apps/web/src/lib/search.ts` compiles it into
+  SQL with the relaxation ladder and `searchRecipes()`; and
+  `apps/web/src/lib/search-service.ts` behind `GET /api/search` joins them to
+  the budget. The UI is `apps/web/src/components/search-bar.tsx` with `?q=` as
+  the URL state. Three rules govern every change to it, all in `HANDOFF.md` in
+  full: time compiles to `total_minutes` and never the `Under 20 min` tag; the
+  null convention is **inverted** from `hardRuleFilter()` — a typed requirement
+  drops null rows, an exclusion does not fire on them; and hard rules are named
+  in a notice but never applied.
 - **Search and enrichment budgets are separate and durable.**
   `@recipes/db/llm-budget` is the one implementation both apps use; every read
   and write requires `kind='scan' | 'search'`. Scan keeps advisory key 2 and
@@ -103,12 +107,14 @@ Do not restart completed phases or re-research facts already recorded there.
   image caching, persistence, pg-boss jobs and cron.
 - `packages/db` — Drizzle schema, migrations, seed and database client.
 - `packages/shared` — client-safe contracts, vocabularies, display formatting,
-  grocery bucket finalization and plain-text rendering, the `SearchFilter`
-  contract, source configuration and validated environment handling. Two
-  subpaths are server-only and deliberately absent from the barrel: `./env`,
-  and `./llm` (which pulls in the `openai` SDK).
+  grocery bucket finalization and plain-text rendering, the `SearchFilter` and
+  `SearchNotice` contracts with their copy, source configuration and validated
+  environment handling. Two subpaths are server-only and deliberately absent
+  from the barrel: `./env`, and `./llm` — which pulls in the `openai` SDK and
+  also owns the search parse prompt, the one task prompt not in the worker
+  (A35).
 - `apps/web/test` — database-backed suites for the app's queries. Added in
-  Phase 5; needs `DATABASE_URL` like the worker's integration tests.
+  `PLAN.md` Phase 5; needs `DATABASE_URL` like the worker's integration tests.
 - `apps/worker/test/fixtures` — real committed source HTML. Keep it; tests must
   not crawl the internet.
 - `plans/` — design documents, one per plan.
@@ -278,18 +284,25 @@ issued for the old origin and will never be sent to the new one.
 
 ## Verification baseline
 
-Current, at FILTER_PLAN Phase 4:
+Current, at FILTER_PLAN Phase 5:
 
-- `corepack pnpm test` (with `DATABASE_URL`) — 836 passing (shared 171, db 20,
-  worker 569, web 76). The root script runs packages one at a time on purpose;
+- `corepack pnpm test` (with `DATABASE_URL`) — 1,832 passing (shared 181, db 20,
+  worker 1,539, web 92). The root script runs packages one at a time on purpose;
   see `HANDOFF.md`. It was 712 at the Phase 7 checkpoint and through
-  FILTER_PLAN Phase 1; Phase 2 added 50, Phase 3 another 65 and Phase 4 another
-  9, without changing an existing assertion.
+  FILTER_PLAN Phase 1; Phase 2 added 50, Phase 3 another 65, Phase 4 another 9,
+  the 1,000-case stress extension took it to 1,806 and Phase 5 added 26 —
+  without changing an existing assertion.
 - `corepack pnpm typecheck` — clean across all workspaces.
-- Production Next.js build — passing.
+- Production Next.js build — passing, and `apps/web/.next/static` greps clean
+  for `OpenAI`, `openrouter.ai`, `createOpenRouterClient` and
+  `StructuredOutputError`. **Run that grep now that `apps/web` calls the model**
+  — it stopped being free at Phase 5.
 - `/api/health` — healthy with 425 recipes.
 - `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file` — HTTP 200,
   and `POST /api/grocery` — HTTP 200.
+- `GET /api/search` — 401 signed out, 400 on an empty or oversized `q`, 503 at
+  the 90% search-budget gate, 200 otherwise. A 200 spends real money; the other
+  three do not.
 
 For a change, run the focused test first, then the full relevant suite. Verify
 database, queue, crawl or UI exit criteria directly rather than relying only on

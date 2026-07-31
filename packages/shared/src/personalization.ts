@@ -455,6 +455,26 @@ export function describeHardRule(rule: HardRule): string {
   }
 }
 
+/**
+ * The same rule as a noun phrase, for a sentence that is about something else.
+ *
+ * FILTER_PLAN.md §4.2 wants `Ignoring your "under 30 minutes" rule for this
+ * search.`, and {@link describeHardRule}'s imperative sentence does not fit
+ * inside that — "Ignoring your 'Hide recipes that take more than 30 minutes'
+ * rule" reads as a quotation of the UI rather than as a description of the
+ * rule. Same fact, said as a thing rather than as an instruction.
+ */
+export function shortHardRuleLabel(rule: HardRule): string {
+  switch (rule.kind) {
+    case 'max_minutes':
+      return `under ${rule.value} minutes`;
+    case 'exclude_category':
+      return `no ${rule.value}`;
+    case 'exclude_tag':
+      return `nothing tagged ${rule.value}`;
+  }
+}
+
 /** The evidence line under it — why the app believes this. */
 export function explainHardRule(rule: HardRule): string {
   const cooks = rule.observations === 1 ? '1 cook' : `${rule.observations} cooks`;

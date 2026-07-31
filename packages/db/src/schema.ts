@@ -474,7 +474,7 @@ export const scanRuns = pgTable(
     newCount: integer('new').notNull().default(0),
     tokensIn: integer('tokens_in').notNull().default(0),
     tokensOut: integer('tokens_out').notNull().default(0),
-    /** Feeds the daily budget cap in `LLM_DAILY_BUDGET_USD`. */
+    /** Feeds the kind-specific enrichment and search daily budget caps. */
     costUsd: numeric('cost_usd', { precision: 12, scale: 6, mode: 'number' })
       .notNull()
       .default(0),

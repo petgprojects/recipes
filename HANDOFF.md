@@ -1,8 +1,8 @@
 # Session Handoff
 
-Current state and the next move. Written 2026-07-28, after Phase 7 closed —
-the personalization loop runs end to end and was verified live against the real
-provider.
+Current state and the next move. Updated 2026-07-30, after natural-language
+search Phase 4 closed — its compiler, parser and independent durable budget are
+complete, but there is still no route or UI.
 
 This file is **not** a history — it holds only what still constrains the code.
 `progress/PLAN.md` is the archive: every amendment (A1–A22), why each decision
@@ -21,8 +21,7 @@ carried over.
 in [`plans/FILTER_PLAN.md`](./plans/FILTER_PLAN.md) and the log is
 [`progress/FILTER_PLAN.md`](./progress/FILTER_PLAN.md), amendments from A23.
 
-**Its Phases 1, 2 and 3 are complete (2026-07-30). Phases 1 and 2 are committed
-(`e9146c9` on branch `filters`); Phase 3 is uncommitted at time of writing.**
+**Its Phases 1 through 4 are complete (2026-07-30) on branch `filters`.**
 
 Phase 1 moved the OpenRouter transport into `packages/shared/src/llm/` behind
 the server-only `@recipes/shared/llm` subpath, as 100%-similarity renames with
@@ -47,10 +46,17 @@ example query, parsed by the *live* model, returns a filter byte-identical to
 the hand-authored one, and that filter compiles to exactly the 12 recipes §1
 names, with zero relaxations. The suite went 762 → **827**.
 
-**Next is its Phase 4** — the separate `SEARCH_DAILY_BUDGET_USD` pot, the
-kind-filtered `getDailyLlmUsage()` and the day-rolling `kind='search'` run row.
-Nothing in `apps/web` has changed yet; there is still no route and no search bar
-(Phase 5).
+Phase 4 moved the one durable lease/accounting implementation out of the worker
+and into the server-only `@recipes/db/llm-budget` subpath. Both budget reads and
+writes require a `scan_runs.kind`; scan keeps advisory key 2 and search uses key
+3, so the independent pots do not block or leak into each other. The
+day-rolling search accumulator is `success` from creation, `/ops` labels it
+**Search**, and `SEARCH_DAILY_BUDGET_USD` defaults to `$0.10` — about 175
+measured production-shaped searches, not thousands. The suite went 827 →
+**836**.
+
+**Next is Phase 5** — `GET /api/search`, its 90%/503 gate, the signed-in search
+bar and URL state. There is still no search route or search UI.
 
 The options below remain open and unstarted; none of them blocks the search work:
 
@@ -154,12 +160,14 @@ off a screenshot are the correct ones to pass back.
   `saved_recipes`, **0** `grocery_checks`, **0** `cook_logs`, **0**
   `user_preferences`, **0** `recipe_scores` — every probe row from Phases 4
   through 7 was removed.
+- **0 `kind='search'` scan rows** — Phase 4's synthetic two-kind live probe was
+  removed after `/ops` displayed its label and cost.
 - OpenRouter spend to date ≈ **$0.43** — $0.32 through Phase 7, plus about
   $0.11 across eleven Phase 3 fixture runs. One run of
   `scripts/check-search-parse.ts` is 35 calls and roughly $0.009.
 
-Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **827
-passing** (shared 167, db 20, worker 565, web 75); four typechecks clean;
+Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **836
+passing** (shared 171, db 20, worker 569, web 76); four typechecks clean;
 production build clean; all four secrets absent from `apps/web/.next/static`;
 `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file`,
 `POST /api/grocery`, `GET/POST /api/ratings`, `DELETE /api/ratings/:id` and
@@ -183,7 +191,7 @@ panel, and the full Phase 7 loop — three derived rules took browse from 235 to
 
 Each one has a plausible-looking wrong version, and most fail silently.
 
-### Search (FILTER_PLAN Phase 2, A27, A28)
+### Search (FILTER_PLAN Phases 2–4, A27, A28, A32, A33)
 
 - **Time compiles to `total_minutes`, never to the `Under 20 min` tag.** 12
   recipes carry the tag; 34 satisfy the column. Trusting the tag silently loses
@@ -222,6 +230,26 @@ Each one has a plausible-looking wrong version, and most fail silently.
 - **`scan_runs.kind` is not decoration.** `source_id is null` already means "a
   run spanning every source"; do not reuse that null as the search
   discriminator, or Phase 4's separate budget cannot be built.
+- **There is one budget implementation: `@recipes/db/llm-budget`.** Shared
+  cannot own DB-backed accounting because DB already depends on shared, and web
+  cannot import worker. Do not restore a worker-local copy or add a web-local
+  lease; two implementations are two budgets.
+- **Every budget read and write names its kind.** `getDailyLlmUsage()` filters
+  by both UTC day and kind, and `recordLlmUsage()` rejects a mismatched row.
+  The `/ops` UTC-day tile is the deliberate exception: it is total spend and
+  continues summing both kinds.
+- **The advisory keys are separate on purpose:** scan is `2`, search is `3`.
+  The pots are independent, so making a user search wait behind an enrichment
+  preflight protects nothing. Search accumulator creation shares key `3`, which
+  is what makes one row per UTC day safe without another migration.
+- **A search accumulator is never `running`.** It is `success` with a non-null
+  `finished_at` from creation and advances the timestamp per search, or `/ops`
+  reads the all-day accumulator as a stuck scan. `hasCompletedScan()` must keep
+  filtering `kind='scan'`, or that successful row suppresses fresh-DB bootstrap.
+- **The paid parse diagnostic is outside the search pot.**
+  `scripts/check-search-parse.ts` opens no `scan_runs` row by design; routing it
+  through the budget would let a diagnostic consume the next day's search
+  allowance.
 - **`SEARCH_VOCAB_VERSION` is meant to break the build** (A25, A27). It is
   derived from `CATEGORIES` and `TAGS` and pinned literally in
   `packages/shared/test/search.test.ts` *and* in
@@ -492,6 +520,10 @@ Each one has a plausible-looking wrong version, and most fail silently.
   is a production build plus a grep of `apps/web/.next/static` for `OpenAI` and
   `openrouter.ai`; it was clean when the transport moved, and it stops being
   free once `apps/web` has a real caller.
+- **`@recipes/db/llm-budget` is the server-side seam for both apps.** It is
+  deliberately absent from the `@recipes/db` barrel and receives a database
+  explicitly; keep it that way so importing budget types does not open a
+  second connection or make client code inherit server accounting.
 - Keep the committed source HTML fixtures. Tests must never crawl.
 
 ---

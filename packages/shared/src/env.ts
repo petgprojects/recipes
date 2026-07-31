@@ -60,6 +60,9 @@ const envSchema = z.object({
   OPENROUTER_MODEL: z.string().min(1).default('deepseek/deepseek-v4-flash'),
   LLM_DAILY_BUDGET_USD: z.coerce.number().positive().default(1.0),
 
+  // ── FILTER_PLAN Phase 4 — natural-language search ────────────────────────
+  SEARCH_DAILY_BUDGET_USD: z.coerce.number().positive().default(0.1),
+
   // ── Phase 1 — deterministic scan worker ─────────────────────────────────
   RECIPE_IMAGES_DIR: z.string().trim().min(1).default('./data/images'),
   SCAN_CRON_SCHEDULE: z.string().trim().min(1).default('0 3 * * *'),

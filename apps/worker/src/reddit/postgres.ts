@@ -5,6 +5,7 @@ import {
 import { and, asc, eq } from '@recipes/db/operators';
 import { scanRuns, sources } from '@recipes/db/schema';
 import type { Database } from '@recipes/db/client';
+import { createBudgetedLlmCallOptions } from '@recipes/db/llm-budget';
 import {
   createPostgresIngredientMatcher,
   normalizeIngredientLines,
@@ -16,7 +17,6 @@ import {
   type StructuredOutputCallOptions,
   type StructuredOutputClient,
 } from '../llm';
-import { createBudgetedLlmCallOptions } from '../enrichment';
 import type { AllSourcesScanSummary } from '../scan/orchestrator';
 import { createFetcher, type PoliteFetcher } from '../scanner/fetcher';
 import { cacheRecipeImage } from '../storage/images';
@@ -284,6 +284,7 @@ function budgetedRedditCallOptions(
   const budgeted = createBudgetedLlmCallOptions({
     db: options.db,
     runId: context.runId,
+    kind: 'scan',
     dailyBudgetUsd: options.dailyBudgetUsd,
     ...(context.signal === undefined ? {} : { signal: context.signal }),
   });

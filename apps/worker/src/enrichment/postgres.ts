@@ -11,10 +11,7 @@ import {
   and,
   asc,
   eq,
-  gte,
   isNull,
-  lt,
-  sql,
 } from '@recipes/db/operators';
 import {
   recipeIngredients,
@@ -206,17 +203,6 @@ function rejectedValues(
   };
 }
 
-export interface LlmUsageIncrement {
-  readonly tokensIn: number;
-  readonly tokensOut: number;
-  readonly costUsd: number;
-}
-
-export interface DailyLlmUsage extends LlmUsageIncrement {
-  readonly dayStartedAt: Date;
-  readonly dayEndsAt: Date;
-}
-
 /** A null-source scan run represents one whole-backlog enrichment pass. */
 export async function beginEnrichmentRun(
   db: Database,
@@ -226,6 +212,7 @@ export async function beginEnrichmentRun(
     .insert(scanRuns)
     .values({
       sourceId: null,
+      kind: 'scan',
       startedAt,
       status: 'running',
       found: 0,
@@ -241,31 +228,6 @@ export async function beginEnrichmentRun(
     throw new Error('Could not create enrichment scan run');
   }
   return run.id;
-}
-
-/**
- * Records each provider response immediately. The arithmetic happens in
- * Postgres, so concurrent callbacks cannot lose one another's increments.
- */
-export async function recordLlmUsage(
-  db: Database,
-  runId: string,
-  usage: LlmUsageIncrement,
-): Promise<void> {
-  assertUsage(usage);
-  const updated = await db
-    .update(scanRuns)
-    .set({
-      tokensIn: sql`${scanRuns.tokensIn} + ${usage.tokensIn}`,
-      tokensOut: sql`${scanRuns.tokensOut} + ${usage.tokensOut}`,
-      costUsd: sql`${scanRuns.costUsd} + ${usage.costUsd}`,
-    })
-    .where(eq(scanRuns.id, runId))
-    .returning({ id: scanRuns.id });
-
-  if (updated.length === 0) {
-    throw new Error(`Cannot record LLM usage for missing scan run ${runId}`);
-  }
 }
 
 export interface FinishEnrichmentRunInput {
@@ -301,58 +263,5 @@ export async function finishEnrichmentRun(
 
   if (updated.length === 0) {
     throw new Error(`Cannot finish missing enrichment scan run ${input.runId}`);
-  }
-}
-
-/**
- * Budget day is UTC and is attributed by run start. Enrichment jobs are
- * bounded to six hours and are started by the daily worker schedule, so a run
- * cannot split its aggregate across multiple budget rows.
- */
-export async function getDailyLlmUsage(
-  db: Database,
-  at = new Date(),
-): Promise<DailyLlmUsage> {
-  const dayStartedAt = utcDayStart(at);
-  const dayEndsAt = new Date(dayStartedAt.getTime() + 24 * 60 * 60 * 1_000);
-  const [usage] = await db
-    .select({
-      tokensIn: sql<number>`coalesce(sum(${scanRuns.tokensIn}), 0)::int`,
-      tokensOut: sql<number>`coalesce(sum(${scanRuns.tokensOut}), 0)::int`,
-      costUsd: sql<number>`coalesce(sum(${scanRuns.costUsd}), 0)::double precision`,
-    })
-    .from(scanRuns)
-    .where(
-      and(
-        gte(scanRuns.startedAt, dayStartedAt),
-        lt(scanRuns.startedAt, dayEndsAt),
-      ),
-    );
-
-  return {
-    dayStartedAt,
-    dayEndsAt,
-    tokensIn: usage?.tokensIn ?? 0,
-    tokensOut: usage?.tokensOut ?? 0,
-    costUsd: usage?.costUsd ?? 0,
-  };
-}
-
-function utcDayStart(at: Date): Date {
-  if (Number.isNaN(at.getTime())) throw new TypeError('Budget date is invalid');
-  return new Date(
-    Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()),
-  );
-}
-
-function assertUsage(usage: LlmUsageIncrement): void {
-  if (!Number.isSafeInteger(usage.tokensIn) || usage.tokensIn < 0) {
-    throw new TypeError('tokensIn must be a non-negative safe integer');
-  }
-  if (!Number.isSafeInteger(usage.tokensOut) || usage.tokensOut < 0) {
-    throw new TypeError('tokensOut must be a non-negative safe integer');
-  }
-  if (!Number.isFinite(usage.costUsd) || usage.costUsd < 0) {
-    throw new TypeError('costUsd must be a non-negative finite number');
   }
 }

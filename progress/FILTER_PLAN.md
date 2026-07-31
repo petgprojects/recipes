@@ -14,12 +14,9 @@ document.
 
 ## Setup still needed from Peter
 
-| Item | Needed by | Status |
-|---|---|---|
-| `SEARCH_DAILY_BUDGET_USD` in local `.env` | Phase 4 | ⏳ not yet added; defaults to `0.10` if absent |
-
-Nothing else. `OPENROUTER_API_KEY` is already configured and is the only
-credential this plan needs.
+Nothing. `SEARCH_DAILY_BUDGET_USD` has a validated `0.10` default; a local
+`.env` value is only an optional override. `OPENROUTER_API_KEY` is already
+configured and is the only credential this plan needs.
 
 ---
 
@@ -30,14 +27,14 @@ credential this plan needs.
 | 1 — Move the LLM transport to `@recipes/shared/llm` | ✅ complete — 2026-07-30 |
 | 2 — `SearchFilter` contract, compiler, migration `0004_search.sql` | ✅ complete — 2026-07-30 |
 | 3 — The parse step and its fixtures | ✅ complete — 2026-07-30 |
-| 4 — Budget, accounting, `/ops` labelling | ⬜ not started |
+| 4 — Budget, accounting, `/ops` labelling | ✅ complete — 2026-07-30 |
 | 5 — `/api/search`, search bar, URL state | ⬜ not started |
 
 Exit criteria for each are in `plans/FILTER_PLAN.md` §7. Verification baseline
-after Phase 3: **827 tests passing** (shared 167, db 20, worker 565, web 75),
+after Phase 4: **836 tests passing** (shared 171, db 20, worker 569, web 76),
 clean typecheck, passing production build. It was 712 at the Phase 7 checkpoint
-and at the end of Phase 1; Phase 2 added 50 and Phase 3 another 65, neither
-changing an existing assertion.
+and at the end of Phase 1; Phase 2 added 50, Phase 3 added 65 and Phase 4 added
+9, without changing an existing assertion.
 
 ---
 
@@ -420,6 +417,85 @@ The worktree is left dirty and uncommitted for review.
 
 ---
 
+## Phase 4 — Budget and accounting ✅
+
+The separate search pot is now real, not just an env name.
+`SEARCH_DAILY_BUDGET_USD` is a positive validated number in
+`@recipes/shared/env`, defaults to **`0.10`**, and is listed in `.env.example`.
+That default was retained from §8 because the Phase 3 measurement gives it a
+meaningful capacity: at about **$0.00057 per search**, it is roughly **175
+searches per UTC day** for the expected ~10 users — ample, but not “thousands.”
+
+**Exit criterion met against the live database.** A synthetic scan response and
+search response on the same UTC day were accounted through the real budget
+hooks at **$0.011111** and **$0.022222** respectively. The scan usage read saw
+only the first, the search usage read saw only the second, and the running
+`/ops` page returned 200 with both the **Search** label and `$0.0222`. The two
+probe rows were deleted afterwards and the probe day was verified back at zero.
+No provider call was made.
+
+836 tests pass (up 9: shared 171, db 20, web 76, worker 569), all four
+typechecks are clean, and the production build passes.
+
+### Where the one budget implementation lives
+
+The worker-local `apps/worker/src/enrichment/budget.ts` is gone. Its lease,
+`createBudgetedLlmCallOptions()`, `getDailyLlmUsage()` and the atomic usage
+write now live together in `packages/db/src/llm-budget.ts`, exported only as
+the server-side `@recipes/db/llm-budget` subpath. Every existing worker caller
+passes `kind: 'scan'`; Phase 5's web route can import the same implementation
+and pass `kind: 'search'`.
+
+This could not follow Phase 1 literally into `@recipes/shared`: `@recipes/db`
+already depends on shared for its schema vocabularies and env, so shared
+importing DB would create a package cycle. DB is the lowest common server-side
+owner both apps already depend on, and the new subpath accepts a `Database`
+rather than opening a connection at import time. It is deliberately absent
+from the side-effectful `@recipes/db` root barrel.
+
+The old Postgres helpers were moved, not copied. `getDailyLlmUsage(db, kind,
+at)` requires the kind and includes `scan_runs.kind` in the UTC-day predicate.
+`recordLlmUsage(db, runId, kind, usage)` also checks the row kind, so a caller
+cannot charge a search row through the scan pot or vice versa.
+
+### The daily search accumulator and locks
+
+`getOrCreateDailySearchRun()` lazily creates the UTC day's one
+`kind='search'`, null-source row. It is `success` from creation, starts with
+zero counts and usage, and has a non-null `finished_at`; every search call
+advances that timestamp monotonically. Concurrent first searches return the
+same row, and the UTC rollover creates a new one.
+
+**The pots use separate advisory keys (A33): scan remains key `2`; search uses
+key `3`.** The daily totals are genuinely independent now, so sharing a key
+would add user-visible waiting behind enrichment without protecting shared
+state. Search-row select-or-insert uses the same search key, which is what makes
+the one-row-per-day invariant safe without another migration or a duplicate
+lease implementation.
+
+Tests pin same-kind serialization, cross-kind non-blocking, both directions of
+budget isolation at the cap, concurrent accumulator creation, UTC rollover,
+success/`finished_at` lifecycle fields and mismatched-kind write rejection.
+
+### `/ops` and one hidden lifecycle consequence
+
+The recent-run query now selects `kind`: a search row is labelled **Search**,
+while a null-source scan row remains **All sources**. The “LLM UTC day” tile is
+still deliberately unfiltered and therefore remains total spend across both
+kinds.
+
+Making the search accumulator `success` from creation exposed one unrelated
+consumer of the old implicit assumption: `hasCompletedScan()` counted any
+successful `scan_runs` row. On a fresh database, a search row could therefore
+suppress bootstrap ingestion. It now requires `kind='scan'`, with a
+database-backed regression test.
+
+`apps/worker/scripts/check-search-parse.ts` remains deliberately outside this
+machinery. It still opens no `scan_runs` row and cannot consume the following
+day's user-facing search budget; no prompt or fixture changed.
+
+---
+
 ## Amendments
 
 Recorded here as they happen. The four below were settled during the design
@@ -499,6 +575,22 @@ relaxes differently on a coin toss. `dropEmptyTerms()` removes a small stoplist
 of meal nouns and spent time words, because terms are ANDed into the `WHERE` and
 a stray "leftovers" narrows a search by the wrong noun. Each is a property the
 prompt asks for and code guarantees, in the spirit of A18's mapper guard.
+
+The two below were settled during Phase 4 by the package boundary and the two
+independent durable totals.
+
+**A32 — Budget/accounting is a server-only `@recipes/db` subpath.** Moving it
+to `@recipes/shared` would make shared import DB while DB already imports
+shared, and leaving it in the worker would keep it unreachable from Phase 5.
+`@recipes/db/llm-budget` is the one implementation both apps use; it is absent
+from the DB barrel and receives its database explicitly.
+
+**A33 — Scan and search use separate advisory-lock keys.** Scan keeps key `2`;
+search uses key `3`, including daily accumulator creation. Once every usage
+read and write requires a kind, the pots share no mutable budget state, so one
+lock would only make a search wait behind enrichment. Same-kind requests still
+serialize from preflight through the durable write, and tests prove cross-kind
+preflights do not block.
 
 ---
 

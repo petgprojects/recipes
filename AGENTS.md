@@ -16,7 +16,7 @@ checkpoint, read documents in this order:
 | Plan | Log | State |
 |---|---|---|
 | `plans/PLAN.md` | `progress/PLAN.md` | ✅ complete — Phases 0–7, amendments A1–A22 |
-| `plans/FILTER_PLAN.md` | `progress/FILTER_PLAN.md` | 🔨 current — NL search, Phases 1–3 done, amendments A23–A31 |
+| `plans/FILTER_PLAN.md` | `progress/FILTER_PLAN.md` | 🔨 current — NL search, Phases 1–4 done, amendments A23–A33 |
 
 Amendment numbering is continuous across plans, so "amendment A18" resolves to
 exactly one document. Inline `PLAN.md §4` citations in source comments refer to
@@ -27,9 +27,9 @@ Do not restart completed phases or re-research facts already recorded there.
 
 ## Current checkpoint
 
-- **`PLAN.md` Phases 0–7 are complete**, and `FILTER_PLAN.md` Phases 1–3 are
-  too. Nothing is half-finished; the next move is that plan's **Phase 4**,
-  budget and accounting.
+- **`PLAN.md` Phases 0–7 are complete**, and `FILTER_PLAN.md` Phases 1–4 are
+  too. Nothing is half-finished; the next move is that plan's **Phase 5**,
+  route and UI.
 - **Natural-language search parses and compiles, but nothing calls it yet.**
   `@recipes/shared/search` owns the `SearchFilter` contract,
   `apps/worker/src/llm/parse-search-query.ts` produces one from a sentence, and
@@ -39,6 +39,12 @@ Do not restart completed phases or re-research facts already recorded there.
   and never the `Under 20 min` tag, and the null convention is **inverted** from
   `hardRuleFilter()` — a typed requirement drops null rows, an exclusion does
   not fire on them.
+- **Search and enrichment budgets are separate and durable.**
+  `@recipes/db/llm-budget` is the one implementation both apps use; every read
+  and write requires `kind='scan' | 'search'`. Scan keeps advisory key 2 and
+  search uses key 3. `SEARCH_DAILY_BUDGET_USD` defaults to `$0.10`, about 175
+  measured searches per UTC day. `/ops` labels the successful day-rolling
+  search row while its UTC-day tile correctly remains total spend.
 - **The parse step is graded by a script that spends money.** 30 committed
   fixtures in `apps/worker/test/fixtures/search-queries.ts` run offline in
   `pnpm test`, and `apps/worker/scripts/check-search-parse.ts` runs the same
@@ -272,13 +278,13 @@ issued for the old origin and will never be sent to the new one.
 
 ## Verification baseline
 
-Current, at FILTER_PLAN Phase 3:
+Current, at FILTER_PLAN Phase 4:
 
-- `corepack pnpm test` (with `DATABASE_URL`) — 827 passing (shared 167, db 20,
-  worker 565, web 75). The root script runs packages one at a time on purpose;
+- `corepack pnpm test` (with `DATABASE_URL`) — 836 passing (shared 171, db 20,
+  worker 569, web 76). The root script runs packages one at a time on purpose;
   see `HANDOFF.md`. It was 712 at the Phase 7 checkpoint and through
-  FILTER_PLAN Phase 1; Phase 2 added 50 and Phase 3 another 65, neither
-  changing an existing assertion.
+  FILTER_PLAN Phase 1; Phase 2 added 50, Phase 3 another 65 and Phase 4 another
+  9, without changing an existing assertion.
 - `corepack pnpm typecheck` — clean across all workspaces.
 - Production Next.js build — passing.
 - `/api/health` — healthy with 425 recipes.

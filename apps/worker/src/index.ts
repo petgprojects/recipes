@@ -1,9 +1,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { client, db, ingredients, sql } from '@recipes/db';
+import { createBudgetedLlmCallOptions } from '@recipes/db/llm-budget';
 import { env, hasEnv, requireEnv } from '@recipes/shared/env';
 import {
-  createBudgetedLlmCallOptions,
   createEnrichmentJobRunner,
   createPostgresIngredientBackfillOrchestrator,
   createPostgresEnrichmentOrchestrator,
@@ -91,6 +91,7 @@ export async function startWorkerRuntime(): Promise<WorkerRuntime> {
           const budgeted = createBudgetedLlmCallOptions({
             db,
             runId: input.runId,
+            kind: 'scan',
             dailyBudgetUsd: env.LLM_DAILY_BUDGET_USD,
             signal: input.signal,
           });

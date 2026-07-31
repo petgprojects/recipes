@@ -7,7 +7,7 @@ import {
   sources,
   sql,
 } from '@recipes/db';
-import type { ScanRunStatus } from '@recipes/shared';
+import type { ScanRunKind, ScanRunStatus } from '@recipes/shared';
 
 export interface OpsSource {
   id: string;
@@ -32,6 +32,7 @@ export interface OpsSource {
 
 export interface RecentScan {
   id: string;
+  kind: ScanRunKind;
   sourceName: string;
   status: ScanRunStatus;
   startedAt: Date;
@@ -135,6 +136,7 @@ export async function loadOpsSnapshot(): Promise<OpsSnapshot> {
     db
       .select({
         id: scanRuns.id,
+        kind: scanRuns.kind,
         sourceName: sources.name,
         status: scanRuns.status,
         startedAt: scanRuns.startedAt,
@@ -212,7 +214,10 @@ export async function loadOpsSnapshot(): Promise<OpsSnapshot> {
     sources: sourceSnapshots,
     recentScans: recentRows.map((row) => ({
       ...row,
-      sourceName: row.sourceName ?? 'All sources',
+      sourceName:
+        row.kind === 'search'
+          ? 'Search'
+          : row.sourceName ?? 'All sources',
     })),
   };
 }

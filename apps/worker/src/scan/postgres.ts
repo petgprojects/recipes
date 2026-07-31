@@ -177,13 +177,18 @@ export function createPostgresScanOrchestrator(
 /**
  * Used by bootstrap scheduling. A partial scan is still completed work; a
  * source-level `error` is not, so a restart can retry a completely failed
- * fresh database.
+ * fresh database. Search accumulator rows never count as ingestion work.
  */
 export async function hasCompletedScan(db: Database): Promise<boolean> {
   const [row] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(scanRuns)
-    .where(inArray(scanRuns.status, ['success', 'partial']));
+    .where(
+      and(
+        eq(scanRuns.kind, 'scan'),
+        inArray(scanRuns.status, ['success', 'partial']),
+      ),
+    );
   return (row?.count ?? 0) > 0;
 }
 

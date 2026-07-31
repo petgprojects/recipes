@@ -6,6 +6,10 @@ import {
 } from '@recipes/db/schema';
 import type { Database } from '@recipes/db/client';
 import {
+  createBudgetedLlmCallOptions,
+  isLlmBudgetExceeded,
+} from '@recipes/db/llm-budget';
+import {
   classifySuitability,
   deriveFields,
   mapIngredients,
@@ -30,10 +34,6 @@ import {
   finishEnrichmentRun,
   loadNextPendingRecipe,
 } from './postgres';
-import {
-  createBudgetedLlmCallOptions,
-  isLlmBudgetExceeded,
-} from './budget';
 
 export interface CreatePostgresEnrichmentOrchestratorOptions {
   readonly db: Database;
@@ -98,6 +98,7 @@ export function createPostgresEnrichmentOrchestrator(
     createBudgetedLlmCallOptions({
       db: options.db,
       runId,
+      kind: 'scan',
       dailyBudgetUsd: options.dailyBudgetUsd,
       signal,
       now: options.now,
@@ -168,6 +169,7 @@ export function createPostgresIngredientBackfillOrchestrator(
           createBudgetedLlmCallOptions({
             db: options.db,
             runId: context.runId,
+            kind: 'scan',
             dailyBudgetUsd: options.dailyBudgetUsd,
             signal: context.signal,
             now: options.now,

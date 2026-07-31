@@ -387,14 +387,34 @@ its place — "healthy" is the obvious candidate — and at that point the const
 should be shared, so Phase 5 can name the grouping in the results header
 ("Showing low-effort recipes") instead of listing five tags.
 
-### Known gap
+### Known gap, and what it measures
 
 The check script sends the **committed 90-name fixture vocabulary**, while Phase
 5 will send the ~554 canonical names on active recipes. A fixture that changes
 whenever the crawler finds a new ingredient is not a fixture, so this is the
-right trade — but it means the exclusion fixtures have not been exercised at
+right trade — but it means the exclusion fixtures are not exercised at
 production vocabulary size. `--live-vocabulary` runs exactly that, and prints a
 banner saying its count is information rather than the §7 exit criterion.
+
+Run once at 554 names, it scored **26 of 30** against 28–29 at fixture size, so
+the larger vocabulary does cost some accuracy — more near-miss distractors for
+every exclusion. Not alarming, and worth re-checking in Phase 5 against a real
+route.
+
+### What a search actually costs — a correction to §8
+
+Measured on the `--live-vocabulary` run, which is the shape Phase 5 will send:
+**153,811 input and 11,049 output tokens over 35 calls, $0.01993** — about
+**4,400 input tokens and $0.00057 per search**. The 554-name vocabulary is most
+of that.
+
+§8 proposes `SEARCH_DAILY_BUDGET_USD` at `0.10` and describes it as "thousands
+of queries at flash pricing". At the measured rate it is closer to **175
+searches a day**. Still ample for a ~10-user ceiling, and the 90% gate will
+never be seen in normal use — but the plan's parenthetical is wrong by an order
+of magnitude, and Phase 4 should pick the default knowing the real number rather
+than inheriting the estimate. Trimming the vocabulary to names on active recipes
+is already the cheap half of this; the rest is the vocabulary itself.
 
 The worktree is left dirty and uncommitted for review.
 

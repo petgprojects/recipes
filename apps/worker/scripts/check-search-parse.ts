@@ -1,5 +1,5 @@
 /**
- * Run the thirty committed parse fixtures against the **real** model.
+ * Run the one-thousand-case committed parse stress suite against the **real** model.
  *
  * ```
  * docker compose exec worker ./node_modules/.bin/tsx scripts/check-search-parse.ts
@@ -13,10 +13,9 @@
  * that have nothing to do with the commit under it. The offline half of this
  * pair lives in `test/llm-parse-search-query.test.ts` and proves the fixtures
  * are *valid*; this is the only thing that proves the model still *agrees*.
- * FILTER_PLAN.md §7 sets the bar at 27 of 30.
+ * The stress run applies the Phase 5 90% gate to all 1,000 cases.
  *
- * Thirty small calls at flash pricing is a fraction of a cent, and the run
- * prints what it actually cost. It does **not** open a `scan_runs` row or touch
+ * The run prints what it actually cost. It does **not** open a `scan_runs` row or touch
  * a budget: accounting is Phase 4, and a diagnostic that quietly ate the
  * following day's search budget would be a poor diagnostic.
  *
@@ -46,10 +45,10 @@ import {
   type SearchQueryFixture,
 } from '../test/fixtures/search-queries';
 
-/** FILTER_PLAN.md §7, Phase 3. Kept next to the number it is compared with. */
-const AGREEMENT_THRESHOLD = 27;
+/** Phase 5's 90% route gate, applied to this larger diagnostic suite. */
+const AGREEMENT_THRESHOLD = Math.ceil(SEARCH_QUERY_FIXTURES.length * 0.9);
 
-/** Enough to finish in a couple of minutes without hammering the provider. */
+/** Bounded so the stress run does not hammer the provider. */
 const CONCURRENCY = 4;
 
 const ZERO_USAGE: LlmUsage = {
@@ -131,11 +130,18 @@ async function main(): Promise<void> {
   const agreed = outcomes.filter((o) => o.diff !== null && o.diff.length === 0);
   const repaired = outcomes.filter((o) => o.repairedTimeTags.length > 0);
 
+  let shownDrifts = 0;
+  const driftByField = new Map<string, number>();
   for (const outcome of outcomes) {
     if (outcome.diff !== null && outcome.diff.length === 0) {
       console.log(`  ok    ${outcome.fixture.query}`);
       continue;
     }
+    for (const field of outcome.diff ?? []) {
+      driftByField.set(field, (driftByField.get(field) ?? 0) + 1);
+    }
+    if (shownDrifts >= 60) continue;
+    shownDrifts += 1;
     console.log(`\n  DRIFT ${outcome.fixture.query}`);
     console.log(`        ${outcome.fixture.note}`);
     if (outcome.error !== null) {
@@ -149,6 +155,19 @@ async function main(): Promise<void> {
         `        ${field}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
       );
     }
+  }
+
+  const totalDrifts = outcomes.length - agreed.length;
+  if (totalDrifts > shownDrifts) {
+    console.log(`\n  ... ${totalDrifts - shownDrifts} additional drifts omitted from the detail log`);
+  }
+  if (driftByField.size > 0) {
+    console.log(
+      `\nDrift by field: ${[...driftByField.entries()]
+        .sort((left, right) => right[1] - left[1])
+        .map(([field, count]) => `${field}=${count}`)
+        .join(', ')}`,
+    );
   }
 
   // §10 open question 1: whether `anyTags` groupings should be a curated

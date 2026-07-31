@@ -38,13 +38,16 @@ compiler's emitted SQL and comparing it to §1's hand-written query. The suite
 went 712 → **762**; nothing existing changed. No LLM is involved anywhere in it.
 
 Phase 3 added `apps/worker/src/llm/parse-search-query.ts` — the prompt, the
-strict schema and three deterministic repairs — plus 30 committed fixture pairs
-and the opt-in `scripts/check-search-parse.ts`. **Its exit criterion is met**:
-all 30 pass offline, and the last three live runs agreed on **28, 28 and 29 of
-30** against a threshold of 27. The whole pipeline now works end to end: the §1
-example query, parsed by the *live* model, returns a filter byte-identical to
-the hand-authored one, and that filter compiles to exactly the 12 recipes §1
-names, with zero relaxations. The suite went 762 → **827**.
+strict schema and three deterministic repairs — plus committed fixture pairs
+and the opt-in `scripts/check-search-parse.ts`. The original 30-case exit
+criterion remains met (28–29 of 30 live agreements); it now has a corpus-shaped
+1,000-case stress matrix layered over those anchors. All 1,000 pass offline.
+The one-off live stress run on 2026-07-30 agreed on **932 of 1,000 (93.2%)**,
+above the 90% gate, with zero time-tag repairs, at an estimated **$0.27187**.
+The whole pipeline still works end to end: the §1 example query, parsed by the
+*live* model, returns a filter byte-identical to the hand-authored one, and that
+filter compiles to exactly the 12 recipes §1 names, with zero relaxations.
+The suite grew by the stress cases; the current full count is recorded below.
 
 Phase 4 moved the one durable lease/accounting implementation out of the worker
 and into the server-only `@recipes/db/llm-budget` subpath. Both budget reads and
@@ -106,7 +109,8 @@ docker compose exec worker ./node_modules/.bin/tsx scripts/run-personalization.t
 ```
 
 The other script that spends money is the Phase 3 parse check — opt-in, never
-part of `pnpm test`, about $0.009 a run:
+part of `pnpm test`. The committed suite has 1,000 cases; the live script uses
+the Phase 5 90% gate and prints field-level drift summaries:
 
 ```bash
 docker compose exec worker ./node_modules/.bin/tsx scripts/check-search-parse.ts
@@ -162,12 +166,14 @@ off a screenshot are the correct ones to pass back.
   through 7 was removed.
 - **0 `kind='search'` scan rows** — Phase 4's synthetic two-kind live probe was
   removed after `/ops` displayed its label and cost.
-- OpenRouter spend to date ≈ **$0.43** — $0.32 through Phase 7, plus about
-  $0.11 across eleven Phase 3 fixture runs. One run of
-  `scripts/check-search-parse.ts` is 35 calls and roughly $0.009.
+- OpenRouter spend to date ≈ **$0.70** — the prior ≈ $0.43 plus the 1,000-case
+  stress run at an estimated $0.27187. The stress run used
+  `SEARCH_DAILY_BUDGET_USD=5` only on its `docker compose exec` process; the
+  repository default and `.env` remain unchanged.
 
-Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **836
-passing** (shared 171, db 20, worker 569, web 76); four typechecks clean;
+Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **1,806
+passing** (shared 171, db 20, worker 1,539, web 76); the worker typecheck is
+clean;
 production build clean; all four secrets absent from `apps/web/.next/static`;
 `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file`,
 `POST /api/grocery`, `GET/POST /api/ratings`, `DELETE /api/ratings/:id` and

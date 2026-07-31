@@ -31,7 +31,8 @@ configured and is the only credential this plan needs.
 | 5 — `/api/search`, search bar, URL state | ⬜ not started |
 
 Exit criteria for each are in `plans/FILTER_PLAN.md` §7. Verification baseline
-after Phase 4: **836 tests passing** (shared 171, db 20, worker 569, web 76),
+after the stress extension: **1,806 tests passing** (shared 171, db 20, worker
+1,539, web 76),
 clean typecheck, passing production build. It was 712 at the Phase 7 checkpoint
 and at the end of Phase 1; Phase 2 added 50, Phase 3 added 65 and Phase 4 added
 9, without changing an existing assertion.
@@ -496,6 +497,26 @@ day's user-facing search budget; no prompt or fixture changed.
 
 ---
 
+## Stress evaluation — complete — 2026-07-30
+
+The original 30 hand-authored parse fixtures remain as regression anchors. The
+suite now layers a deterministic, corpus-shaped matrix over them and exposes
+exactly **1,000 unique query→`SearchFilter` pairs**. The matrix uses all six
+active-recipe categories, the non-time controlled tags, and a selected set of
+canonical ingredients measured from the 235 active recipes, with single-field,
+exclusion, combination, profile and FTS-term cases. It is still offline-safe:
+the model transport is stubbed in `llm-parse-search-query.test.ts`, and the
+focused suite passes **1,035 assertions**.
+
+The live stress run was intentionally one-off and used
+`SEARCH_DAILY_BUDGET_USD=5` as an `exec`-process override; it did not create a
+`scan_runs` row or alter `.env`. It made 1,000 scored calls plus the five
+unscored grouping probes, agreeing on **932/1,000 (93.2%)** against the new 90%
+diagnostic gate. It spent an estimated **$0.27187**, fired zero time-tag repairs,
+and drifted most often on `tags=31`, `excludeIngredients=22` and
+`freezerOnly=19`. The detailed log was capped at 60 examples and summarized
+the rest by field.
+
 ## Amendments
 
 Recorded here as they happen. The four below were settled during the design
@@ -591,6 +612,14 @@ read and write requires a kind, the pots share no mutable budget state, so one
 lock would only make a search wait behind enrichment. Same-kind requests still
 serialize from preflight through the durable write, and tests prove cross-kind
 preflights do not block.
+
+**A34 — The 30-case parse check has a 1,000-case stress extension.** The
+original 30 remain the hand-authored, plan-level regression anchors. The added
+matrix is generated from real corpus vocabularies so it can cover many natural
+phrases without maintaining a thousand nearly identical blocks by hand. Its
+live diagnostic uses the Phase 5 90% gate, caps mismatch detail, and remains
+outside durable search-budget accounting; a one-off budget override must be
+scoped to the command that launches it.
 
 ---
 

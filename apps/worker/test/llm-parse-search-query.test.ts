@@ -6,7 +6,7 @@
  * covers what only the parse task can get wrong: that the static prompt stays
  * static and states the traps, that the reader's own words never migrate into
  * it, that a search is validated before it is paid for, that the contract
- * reaches the provider as a strict JSON Schema at all — and that all thirty
+ * reaches the provider as a strict JSON Schema at all — and that all one thousand
  * committed fixtures round-trip.
  *
  * The fixture half stubs the transport, so it is not evidence the *model*
@@ -53,15 +53,15 @@ const VOCABULARY = FIXTURE_INGREDIENT_VOCABULARY;
 // ── The fixture set (§7 Phase 3) ────────────────────────────────────────────
 
 describe('the committed fixtures', () => {
-  it('are well formed: thirty of them, on this vocabulary, naming real canonicals', () => {
+  it('are well formed: one thousand of them, on this vocabulary, naming real canonicals', () => {
     expect(() => assertFixturesWellFormed()).not.toThrow();
-    expect(SEARCH_QUERY_FIXTURES).toHaveLength(30);
+    expect(SEARCH_QUERY_FIXTURES).toHaveLength(1_000);
   });
 
   it('were written against this vocabulary version (A25, A27)', () => {
     // Deliberately duplicated from `packages/shared/test/search.test.ts`. When
     // both go red a tag or category moved, and the question to answer first is
-    // whether the thirty expectations above still say what they meant.
+    // whether the stress expectations above still say what they meant.
     expect(FIXTURE_VOCAB_VERSION).toBe(SEARCH_VOCAB_VERSION);
     expect(SEARCH_VOCAB_VERSION).toBe('1-723fe8e6');
   });

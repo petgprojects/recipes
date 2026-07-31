@@ -1,5 +1,5 @@
 /**
- * The Phase 3 parse fixtures: 30 committed query → `SearchFilter` pairs.
+ * The Phase 3 parse fixtures: 1,000 committed query → `SearchFilter` pairs.
  *
  * Amendment A24 chose not to have a cache table, and named this as its cost:
  * there is no query log to harvest, so these are hand-written. They are read
@@ -15,7 +15,7 @@
  * The offline half cannot tell you the prompt is *good* — it stubs the answer.
  * It tells you the prompt is what it was, and what a correct answer looks like.
  * Only the live script says whether the model still agrees, and FILTER_PLAN.md
- * §7 sets that bar at 27 of 30.
+ * The stress evaluation applies the Phase 5 90% gate to all 1,000.
  *
  * **Every expectation here is derivable from `PARSE_SEARCH_QUERY_SYSTEM_PROMPT`
  * by hand.** Where a query could reasonably decompose two ways, the prompt says
@@ -26,9 +26,11 @@
 import {
   EMPTY_SEARCH_FILTER,
   SEARCH_VOCAB_VERSION,
+  TIME_TAGS,
   makeSearchFilter,
   type SearchFilter,
 } from '@recipes/shared/search';
+import { CATEGORIES, TAGS } from '@recipes/shared/vocab';
 
 /**
  * The vocabulary the fixtures were written against (A25, A27).
@@ -189,7 +191,7 @@ function fixture(
   return { query, profile, expected: makeSearchFilter(expected), note };
 }
 
-export const SEARCH_QUERY_FIXTURES: readonly SearchQueryFixture[] = [
+const LEGACY_SEARCH_QUERY_FIXTURES: readonly SearchQueryFixture[] = [
   // ── The plan's own example (§1) ───────────────────────────────────────────
   // Compiled, this filter returns exactly the twelve recipes §1 names — the
   // Phase 2 exit criterion, now reached from a sentence instead of by hand.
@@ -348,18 +350,237 @@ export const SEARCH_QUERY_FIXTURES: readonly SearchQueryFixture[] = [
   ),
 ];
 
-// Guard rails on the fixture set itself. A pair that drifts out of the
-// vocabulary, or a thirty-first that arrives without the exit criterion being
-// re-read, should be a red test rather than a surprise in the live run.
+/**
+ * A corpus-shaped stress matrix rather than a hand-maintained list of 1,000
+ * near-duplicates. The values below were chosen from the active database on
+ * 2026-07-30: every category and non-time tag is live, and every ingredient is
+ * a canonical name already present in the fixture vocabulary. Each template
+ * keeps one interpretation dominant, so a live mismatch is useful evidence
+ * about parsing rather than an argument over what the sentence meant.
+ */
+const STRESS_INGREDIENTS = [
+  'avocados', 'baby spinach', 'bacon', 'bell peppers', 'cabbage', 'capers',
+  'carrots', 'cherry tomatoes', 'chickpeas', 'chili powder', 'cilantro',
+  'cream cheese', 'cumin', 'eggplant', 'feta', 'fresh basil', 'fresh ginger',
+  'garlic cloves', 'goat cheese', 'heavy cream', 'honey', 'jalapeño', 'lemons',
+  'limes', 'maple syrup', 'miso paste', 'mushrooms', 'olive oil',
+  'oyster mushrooms', 'panko breadcrumbs', 'red bell pepper', 'red onion',
+  'red pepper flakes', 'russet potatoes', 'scallions', 'shrimp', 'soy sauce',
+  'spaghetti', 'sweet potatoes', 'tomato paste', 'white rice', 'zucchini',
+] as const;
 
-const FIXTURE_COUNT = 30;
+const STRESS_TAGS = TAGS.filter((tag) => !TIME_TAGS.includes(tag));
+const STRESS_CATEGORIES = [...CATEGORIES];
+const TIME_LIMITS = [10, 15, 20, 25, 30, 45, 60, 90, 120, 180] as const;
+const ACTIVE_LIMITS = [10, 15, 20, 30, 45, 60] as const;
+const SERVING_LIMITS = [4, 6, 8, 10, 12, 20] as const;
+const KEEP_LIMITS = [2, 3, 5, 7, 10, 14] as const;
+const UNMAPPED_TERMS = ['spicy', 'kid-friendly', 'date night'] as const;
+
+function buildStressFixtures(): SearchQueryFixture[] {
+  const output: SearchQueryFixture[] = [];
+  const add = (
+    query: string,
+    expected: Partial<SearchFilter>,
+    note: string,
+    profile: string | null = null,
+  ): void => {
+    output.push(fixture(query, expected, `stress matrix: ${note}`, profile));
+  };
+
+  for (const category of STRESS_CATEGORIES) {
+    for (const query of [
+      `${category} recipes`, `show me ${category} meals`,
+      `recipes in the ${category} category`, `I want ${category} dishes`,
+      `${category} options for dinner`,
+    ]) {
+      add(query, { categories: [category] }, 'category');
+    }
+  }
+
+  for (const tag of STRESS_TAGS) {
+    for (const query of [
+      `${tag} recipes`, `show me meals with the ${tag} tag`,
+      `recipes marked ${tag}`, `I want ${tag} meals`, `give me ${tag} options`,
+    ]) {
+      add(query, { tags: [tag] }, 'tag');
+    }
+  }
+
+  for (const minutes of TIME_LIMITS) {
+    for (const query of [
+      `under ${minutes} minutes`, `meals in ${minutes} minutes or less`,
+      `no more than ${minutes} minutes total`,
+      `recipes ready within ${minutes} minutes`,
+      `quick recipes under ${minutes} minutes`,
+    ]) {
+      add(query, { maxMinutes: minutes }, 'total-time bound, never a time tag');
+    }
+  }
+
+  for (const minutes of ACTIVE_LIMITS) {
+    for (const query of [
+      `no more than ${minutes} minutes hands-on`,
+      `recipes with ${minutes} minutes of active time`,
+      `at most ${minutes} minutes of prep and cooking work`,
+      `hands-on time under ${minutes} minutes`,
+    ]) {
+      add(query, { maxActiveMinutes: minutes }, 'active-time bound');
+    }
+  }
+
+  for (const servings of SERVING_LIMITS) {
+    for (const query of [
+      `recipes that serve at least ${servings}`,
+      `meals for ${servings} or more people`,
+      `something that feeds ${servings} people`,
+      `dinners serving ${servings} people`,
+    ]) {
+      add(query, { minServings: servings }, 'minimum servings');
+    }
+  }
+
+  for (const days of KEEP_LIMITS) {
+    for (const query of [
+      `leftovers that keep for at least ${days} days`,
+      `recipes with leftovers lasting ${days} days`,
+      `meals that stay good for ${days} days`,
+      `dinners I can keep for ${days} days`,
+    ]) {
+      add(query, { minKeepsDays: days }, 'minimum leftover life');
+    }
+  }
+
+  for (const query of [
+    'meals that freeze well', 'freezer-friendly recipes', 'recipes I can freeze',
+    'dinners suitable for freezing', 'something that freezes well for later',
+  ]) {
+    add(query, { freezerOnly: true }, 'freezer requirement, never the Freezes tag');
+  }
+
+  const ingredientForms = [
+    (name: string) => `recipes with ${name}`,
+    (name: string) => `meals featuring ${name}`,
+    (name: string) => `dinners that include ${name}`,
+    (name: string) => `something made with ${name}`,
+    (name: string) => `recipes containing ${name}`,
+  ];
+  for (const ingredient of STRESS_INGREDIENTS) {
+    for (const form of ingredientForms) {
+      add(form(ingredient), { ingredients: [ingredient] }, 'exact ingredient');
+    }
+  }
+
+  const exclusionForms = [
+    (name: string) => `recipes without ${name}`,
+    (name: string) => `meals that avoid ${name}`,
+    (name: string) => `dinners with no ${name}`,
+    (name: string) => `show me recipes excluding ${name}`,
+  ];
+  for (const ingredient of STRESS_INGREDIENTS) {
+    for (const form of exclusionForms) {
+      add(form(ingredient), { excludeIngredients: [ingredient] }, 'exact ingredient exclusion');
+    }
+  }
+
+  for (const category of STRESS_CATEGORIES) {
+    for (const query of [
+      `anything but ${category}`, `recipes excluding the ${category} category`,
+      `no ${category} meals`,
+    ]) {
+      add(query, { excludeCategories: [category] }, 'category exclusion');
+    }
+  }
+
+  for (const tag of STRESS_TAGS) {
+    for (const query of [
+      `recipes without the ${tag} tag`, `meals that are not ${tag}`,
+      `exclude ${tag} recipes`,
+    ]) {
+      add(query, { excludeTags: [tag] }, 'tag exclusion');
+    }
+  }
+
+  for (const category of STRESS_CATEGORIES) {
+    for (const tag of STRESS_TAGS.slice(0, 10)) {
+      add(`${category} recipes with ${tag}`, { categories: [category], tags: [tag] }, 'category plus tag');
+    }
+  }
+
+  for (const minutes of TIME_LIMITS.slice(0, 8)) {
+    for (const tag of STRESS_TAGS.slice(0, 10)) {
+      add(`${tag} recipes under ${minutes} minutes`, { maxMinutes: minutes, tags: [tag] }, 'time plus tag');
+    }
+  }
+
+  for (const ingredient of STRESS_INGREDIENTS.slice(0, 20)) {
+    for (const minutes of TIME_LIMITS.slice(0, 2)) {
+      add(`${ingredient} recipes under ${minutes} minutes`, { maxMinutes: minutes, ingredients: [ingredient] }, 'ingredient plus total time');
+    }
+  }
+
+  for (const category of STRESS_CATEGORIES) {
+    for (const term of UNMAPPED_TERMS) {
+      add(`${term} ${category} recipes`, { categories: [category], unmappedTerms: [term] }, 'category plus an FTS concept term');
+    }
+  }
+
+  for (const phrase of ['easy to make', "something that isn't much work", 'low effort dinners', 'nothing fiddly']) {
+    add(phrase, { anyTags: [...EASY] }, 'the easy-to-make disjunction');
+  }
+  for (const category of STRESS_CATEGORIES) {
+    for (const phrase of ['easy', 'easy to make']) {
+      add(`${phrase} ${category} recipes`, { categories: [category], anyTags: [...EASY] }, 'category plus easy-to-make disjunction');
+    }
+  }
+  for (const minutes of TIME_LIMITS.slice(0, 5)) {
+    add(`easy recipes under ${minutes} minutes`, { maxMinutes: minutes, anyTags: [...EASY] }, 'time plus easy-to-make disjunction');
+  }
+
+  const safeCombinationTags = STRESS_TAGS.slice(0, 6);
+  for (const [index, ingredient] of STRESS_INGREDIENTS.slice(0, 10).entries()) {
+    const tag = safeCombinationTags[index % safeCombinationTags.length]!;
+    add(`${tag} recipes with ${ingredient}`, { tags: [tag], ingredients: [ingredient] }, 'tag plus exact ingredient');
+    add(`${tag} recipes without ${ingredient}`, { tags: [tag], excludeIngredients: [ingredient] }, 'tag plus exact exclusion');
+  }
+  for (const [index, tag] of STRESS_TAGS.slice(0, 10).entries()) {
+    const category = STRESS_CATEGORIES[index % STRESS_CATEGORIES.length]!;
+    add(`${tag} ${category} recipes`, { categories: [category], tags: [tag] }, 'compact category plus tag');
+  }
+
+  for (const category of STRESS_CATEGORIES) {
+    add(
+      `something I'd like tonight in ${category}`,
+      { categories: [category], anyTags: ['One pot', 'Sheet pan'] },
+      'profile fallback',
+      FIXTURE_PROFILE,
+    );
+  }
+  add('slow cooker recipes', { tags: ['Slow cooker'] }, 'explicit query wins over profile', FIXTURE_PROFILE);
+
+  if (output.length < 1_000) {
+    throw new Error(`stress fixture matrix generated only ${output.length} cases`);
+  }
+  return output;
+}
+
+const FIXTURE_COUNT = 1_000;
+const allFixtures = [...LEGACY_SEARCH_QUERY_FIXTURES, ...buildStressFixtures()];
+const uniqueFixtures = allFixtures.filter(
+  (candidate, index) => allFixtures.findIndex((fixture) => fixture.query === candidate.query) === index,
+);
+export const SEARCH_QUERY_FIXTURES: readonly SearchQueryFixture[] = uniqueFixtures.slice(0, FIXTURE_COUNT);
+
+// Guard rails on the fixture set itself. A pair that drifts out of the
+// vocabulary, or a thousandth case that arrives without the evaluation
+// contract being re-read, should be a red test rather than a surprise in the
+// live run.
 
 export function assertFixturesWellFormed(): void {
   if (SEARCH_QUERY_FIXTURES.length !== FIXTURE_COUNT) {
     throw new Error(
-      `FILTER_PLAN.md §7 states the exit criterion as "all ${FIXTURE_COUNT} fixtures pass ` +
-        `offline; at least 27 of ${FIXTURE_COUNT} agree live". There are now ` +
-        `${SEARCH_QUERY_FIXTURES.length}; update the plan and the threshold together.`,
+      `The stress evaluation expects exactly ${FIXTURE_COUNT} fixtures, but there are ` +
+        `${SEARCH_QUERY_FIXTURES.length}; update the matrix and this guard together.`,
     );
   }
   if (FIXTURE_VOCAB_VERSION !== SEARCH_VOCAB_VERSION) {

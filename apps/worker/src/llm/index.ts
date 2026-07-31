@@ -12,3 +12,4 @@ export * from './extract-recipe-from-post';
 export * from './map-ingredients';
 export * from './taste-profile';
 export * from './score-recipes';
+export * from './parse-search-query';

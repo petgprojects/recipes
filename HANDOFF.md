@@ -21,7 +21,8 @@ carried over.
 in [`plans/FILTER_PLAN.md`](./plans/FILTER_PLAN.md) and the log is
 [`progress/FILTER_PLAN.md`](./progress/FILTER_PLAN.md), amendments from A23.
 
-**Its Phases 1 and 2 are complete (2026-07-30, uncommitted at time of writing).**
+**Its Phases 1, 2 and 3 are complete (2026-07-30). Phases 1 and 2 are committed
+(`e9146c9` on branch `filters`); Phase 3 is uncommitted at time of writing.**
 
 Phase 1 moved the OpenRouter transport into `packages/shared/src/llm/` behind
 the server-only `@recipes/shared/llm` subpath, as 100%-similarity renames with
@@ -37,10 +38,19 @@ through the compiler, verified against the live corpus and by dumping the
 compiler's emitted SQL and comparing it to §1's hand-written query. The suite
 went 712 → **762**; nothing existing changed. No LLM is involved anywhere in it.
 
-**Next is its Phase 3** — `apps/worker/src/llm/parse-search-query.ts`, the
-prompt and strict schema that produce a `SearchFilter` from a query string, plus
-~30 committed fixture pairs. That is the first phase of this plan that spends
-money.
+Phase 3 added `apps/worker/src/llm/parse-search-query.ts` — the prompt, the
+strict schema and three deterministic repairs — plus 30 committed fixture pairs
+and the opt-in `scripts/check-search-parse.ts`. **Its exit criterion is met**:
+all 30 pass offline, and the last three live runs agreed on **28, 28 and 29 of
+30** against a threshold of 27. The whole pipeline now works end to end: the §1
+example query, parsed by the *live* model, returns a filter byte-identical to
+the hand-authored one, and that filter compiles to exactly the 12 recipes §1
+names, with zero relaxations. The suite went 762 → **827**.
+
+**Next is its Phase 4** — the separate `SEARCH_DAILY_BUDGET_USD` pot, the
+kind-filtered `getDailyLlmUsage()` and the day-rolling `kind='search'` run row.
+Nothing in `apps/web` has changed yet; there is still no route and no search bar
+(Phase 5).
 
 The options below remain open and unstarted; none of them blocks the search work:
 
@@ -87,6 +97,14 @@ cron (0 3 * * *) → scan job → [enrichment job] → personalization job
 ```bash
 docker compose exec worker ./node_modules/.bin/tsx scripts/run-personalization.ts --user <uuid>
 docker compose exec worker ./node_modules/.bin/tsx scripts/run-personalization.ts --rules-only
+```
+
+The other script that spends money is the Phase 3 parse check — opt-in, never
+part of `pnpm test`, about $0.009 a run:
+
+```bash
+docker compose exec worker ./node_modules/.bin/tsx scripts/check-search-parse.ts
+docker compose exec worker ./node_modules/.bin/tsx scripts/check-search-parse.ts --live-vocabulary
 ```
 
 It spends real money without `--rules-only`. A full 235-recipe scoring pass for
@@ -136,10 +154,12 @@ off a screenshot are the correct ones to pass back.
   `saved_recipes`, **0** `grocery_checks`, **0** `cook_logs`, **0**
   `user_preferences`, **0** `recipe_scores` — every probe row from Phases 4
   through 7 was removed.
-- OpenRouter spend to date ≈ **$0.32**.
+- OpenRouter spend to date ≈ **$0.43** — $0.32 through Phase 7, plus about
+  $0.11 across eleven Phase 3 fixture runs. One run of
+  `scripts/check-search-parse.ts` is 35 calls and roughly $0.009.
 
-Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **762
-passing** (shared 167, db 20, worker 500, web 75); four typechecks clean;
+Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **827
+passing** (shared 167, db 20, worker 565, web 75); four typechecks clean;
 production build clean; all four secrets absent from `apps/web/.next/static`;
 `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file`,
 `POST /api/grocery`, `GET/POST /api/ratings`, `DELETE /api/ratings/:id` and
@@ -204,9 +224,43 @@ Each one has a plausible-looking wrong version, and most fail silently.
   discriminator, or Phase 4's separate budget cannot be built.
 - **`SEARCH_VOCAB_VERSION` is meant to break the build** (A25, A27). It is
   derived from `CATEGORIES` and `TAGS` and pinned literally in
-  `packages/shared/test/search.test.ts`. When it goes red, go and look at
-  whether the Phase 3 fixtures still say what they meant, *then* paste the new
-  value in. Not the other way round.
+  `packages/shared/test/search.test.ts` *and* in
+  `apps/worker/test/fixtures/search-queries.ts`. When it goes red, go and look
+  at whether the Phase 3 fixtures still say what they meant, *then* paste the
+  new value in. Not the other way round.
+
+### The parse step (FILTER_PLAN Phase 3, A29–A31)
+
+- **The prompt carries the vocabularies, not just the schema.** The strict
+  `json_schema` enum stops the model returning a tag that does not exist; it
+  does not tell it that `Cheap` and `Slow cooker` *exist*. Deleting those two
+  interpolated lines from `PARSE_SEARCH_QUERY_SYSTEM_PROMPT` measurably halves
+  the parse quality — that is where 16 of 30 came from, before they were added.
+- **The model cannot name a canonical ingredient it has not been shown.**
+  `parseSearchQuery()` takes the vocabulary as an input, and Phase 5 must pass
+  the ~554 names on active recipes. Pass `[]` and the two ingredient fields come
+  back empty — silently, and correctly, because an invented name matches no row.
+- **Do not "simplify away" the three repairs.** `repairTimeTags()`,
+  `foldSingletonAnyTags()` and `dropEmptyTerms()` each guarantee something the
+  prompt merely asks for. The middle one matters even though it cannot change a
+  result: `@>` and `&&` over one element are the same predicate, but
+  `RELAXATION_LADDER` drops `anyTags` two rungs before `tags`, so without it the
+  same query relaxes differently depending on the sampling.
+- **`repairTimeTags()` reporting non-empty is the alarm worth watching.** It has
+  never fired against the live model. When it does, the §1 time trap is being
+  attempted and the prompt is losing that argument.
+- **The contract's dedupe must stay `.overwrite()`, never `.transform()`.** A
+  Zod transform is unrepresentable in JSON Schema and `z.toJSONSchema()` throws
+  on one — which is what the transport calls. It fails at the provider boundary,
+  not at a type boundary, so nothing catches it until a real search is run.
+- **`scripts/check-search-parse.ts` spends money and is not a test.**
+  `vitest.config.ts` includes `test/**/*.test.ts` only, which is the one thing
+  keeping it out of `pnpm test`. Do not widen that glob.
+- **Prompt tuning past ~28 of 30 is fitting to noise.** At `temperature: 0` the
+  failing *set* rotates run to run while the count sits at 28 ± 1. One edit — an
+  "ORDER OF WORK" numbered checklist — made the model honour an injected
+  `freezerOnly: true` in two runs of three. If you add procedural framing to
+  this prompt, re-run the injection fixture before believing it helped.
 
 ### Personalization, the model half (A21)
 

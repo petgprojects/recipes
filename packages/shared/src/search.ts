@@ -92,13 +92,22 @@ export const EMPTY_SEARCH_FILTER: SearchFilter = Object.freeze({
 
 const boundedMinutes = z.number().int().positive().max(MAX_SEARCH_MINUTES).nullable();
 
-/** Order-preserving dedupe, so a repeated tag is one criterion and not two. */
+/**
+ * Order-preserving dedupe, so a repeated tag is one criterion and not two.
+ *
+ * Applied with `.overwrite()` rather than `.transform()` below. The two do the
+ * same thing to a value, but a transform is *unrepresentable in JSON Schema* —
+ * `z.toJSONSchema()` throws on one — and the whole contract is sent to the
+ * provider as a strict `json_schema`. `.overwrite()` is Zod's same-type-in,
+ * same-type-out variant, and it converts. Found in Phase 3, when the contract
+ * first met the transport; nothing about what a filter *is* changed.
+ */
 function unique<T>(values: T[]): T[] {
   return [...new Set(values)];
 }
 
-const categoryList = z.array(z.enum(CATEGORIES)).max(CATEGORIES.length).transform(unique);
-const tagList = z.array(z.enum(TAGS)).max(TAGS.length).transform(unique);
+const categoryList = z.array(z.enum(CATEGORIES)).max(CATEGORIES.length).overwrite(unique);
+const tagList = z.array(z.enum(TAGS)).max(TAGS.length).overwrite(unique);
 
 /**
  * Free strings, unlike the two above, because the canonical ingredient
@@ -111,12 +120,12 @@ const tagList = z.array(z.enum(TAGS)).max(TAGS.length).transform(unique);
 const ingredientList = z
   .array(z.string().trim().min(1).max(MAX_TERM_CHARS).toLowerCase())
   .max(MAX_SEARCH_INGREDIENTS)
-  .transform(unique);
+  .overwrite(unique);
 
 const termList = z
   .array(z.string().trim().min(1).max(MAX_TERM_CHARS))
   .max(MAX_UNMAPPED_TERMS)
-  .transform(unique);
+  .overwrite(unique);
 
 /**
  * Every field is required, with no defaults.

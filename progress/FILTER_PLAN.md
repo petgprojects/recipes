@@ -29,14 +29,15 @@ credential this plan needs.
 |---|---|
 | 1 — Move the LLM transport to `@recipes/shared/llm` | ✅ complete — 2026-07-30 |
 | 2 — `SearchFilter` contract, compiler, migration `0004_search.sql` | ✅ complete — 2026-07-30 |
-| 3 — The parse step and its fixtures | ⬜ not started |
+| 3 — The parse step and its fixtures | ✅ complete — 2026-07-30 |
 | 4 — Budget, accounting, `/ops` labelling | ⬜ not started |
 | 5 — `/api/search`, search bar, URL state | ⬜ not started |
 
 Exit criteria for each are in `plans/FILTER_PLAN.md` §7. Verification baseline
-after Phase 2: **762 tests passing** (shared 167, db 20, worker 500, web 75),
+after Phase 3: **827 tests passing** (shared 167, db 20, worker 565, web 75),
 clean typecheck, passing production build. It was 712 at the Phase 7 checkpoint
-and at the end of Phase 1; Phase 2 added 50 and changed no existing assertion.
+and at the end of Phase 1; Phase 2 added 50 and Phase 3 another 65, neither
+changing an existing assertion.
 
 ---
 
@@ -204,7 +205,196 @@ is about).
 `SEARCH_VOCAB_VERSION` is `1-723fe8e6` and is asserted literally in
 `packages/shared/test/search.test.ts`. When that assertion goes red a vocabulary
 changed: check whether the fixtures still express what they meant **before**
-pasting the new value in.
+pasting the new value in. *Phase 3 pinned the same literal a second time, in
+`apps/worker/test/fixtures/search-queries.ts`, so both go red together.*
+
+The worktree is left dirty and uncommitted for review.
+
+---
+
+## Phase 3 — The parse step ✅
+
+`apps/worker/src/llm/parse-search-query.ts` (the prompt, the strict schema and
+three deterministic repairs), `apps/worker/test/fixtures/search-queries.ts` (30
+committed query→`SearchFilter` pairs and the fixture vocabulary),
+`apps/worker/test/llm-parse-search-query.test.ts` (65 offline assertions) and
+`apps/worker/scripts/check-search-parse.ts` (opt-in, billable, never in
+`pnpm test`).
+
+**Exit criterion met.** All 30 fixtures pass offline. Against the live model the
+last three runs of the check script agreed on **28, 28 and 29 of 30**, against a
+threshold of 27.
+
+And the end-to-end check the plan asks for: the §1 example query, parsed by the
+**live model**, produced
+
+```json
+{"maxMinutes":20,"tags":["High protein"],
+ "anyTags":["Hands-off","One pot","One cleanup","Sheet pan","No cook"], …}
+```
+
+— byte-identical to the hand-authored `EXAMPLE_QUERY_FILTER` in
+`apps/web/test/search.integration.test.ts` — and that filter, run through the
+Phase 2 compiler, returned **exactly 12 recipes with zero relaxations**. A
+sentence now reaches the same twelve rows §1 named, end to end.
+
+827 tests pass (up 65), four typechecks are clean, the production build passes,
+and `apps/web/.next/static` (34 files) still greps clean for `openrouter.ai`,
+`OpenAI`, `createOpenRouterClient` and `StructuredOutputError`. Total live spend
+across eleven check-script runs was about **$0.11**; one run is roughly $0.009
+for 35 calls.
+
+### How to run it
+
+```bash
+docker compose exec worker ./node_modules/.bin/tsx scripts/check-search-parse.ts
+docker compose exec worker ./node_modules/.bin/tsx scripts/check-search-parse.ts --live-vocabulary
+```
+
+It spends real money. `vitest.config.ts` includes `test/**/*.test.ts` only, so
+nothing can drag it into `pnpm test` by accident — which is the point: a suite
+that calls a paid provider fails on an aeroplane and goes red for reasons that
+have nothing to do with the commit under it.
+
+### Decisions
+
+**The canonical ingredient vocabulary is an input to the parse (A29).** §3.2
+says the model must emit exact `ingredients.name` values and the plan notes that
+789 of them will not fit in a JSON Schema enum — but it never says how the model
+is supposed to know them. Prompt rules alone cannot work: the corpus splits one
+food across many rows, so "no chicken" has to reach `chicken`, `chicken breast`,
+`chicken thighs` and `ground chicken`, and a model told only to "use the plain
+generic name" emits `chicken`, which is on 2 recipes. So the vocabulary is
+supplied in the user payload, the way `map-ingredients.ts` supplies its own.
+Pass the names on at least one *active* recipe — 554 of the 789 — because a
+canonical no live recipe uses cannot change a result and is pure cost.
+
+**No guard drops an unknown ingredient name**, and that is deliberate rather
+than an omission. An unknown *exclusion* is already a no-op in SQL, so dropping
+it changes nothing; an unknown *inclusion* correctly returns nothing, and
+dropping it would turn "with harissa" — which the corpus genuinely cannot
+answer — into a page of recipes without harissa. The schema's free strings plus
+exact matching are already right in both directions.
+
+**The prompt carries the `CATEGORIES` and `TAGS` vocabularies (A30).** They were
+already in the strict JSON Schema as enums, and that is not enough. The enum
+stops the model returning a tag that does not exist; it does not tell it that
+`Cheap` and `Slow cooker` are things this collection *has*. The first live run,
+before those two lines existed, scored **16 of 30** and put "cheap" and "high
+protein" in `unmappedTerms` while leaving `tags` empty. `derive-fields.ts`
+states its vocabulary in the prompt for the same reason, and it was the single
+largest improvement of the phase: 16 → 25.
+
+**Three deterministic repairs sit between the model and the caller (A31).** Each
+is a property the prompt asks for and code now guarantees, in the same spirit as
+`isPlausibleCanonicalMatch()` (A18):
+
+- `repairTimeTags()` takes any of `TIME_TAGS` back out of `tags`/`anyTags` and
+  turns it into the `maxMinutes` it was standing in for. Dropping the tag alone
+  would be *worse* than leaving it — "under 20 minutes" would silently become no
+  constraint at all — and where several disagree the loosest wins, because a
+  bound that is too tight hides recipes while one too loose only shows extra.
+  It reports what it repaired rather than swallowing it, and the check script
+  counts that: **across every live run it has never once fired.**
+- `foldSingletonAnyTags()` moves a lone tag from `anyTags` into `tags`. Over one
+  element `@>` and `&&` are the *same predicate*, so the model's choice between
+  them is invisible in the results — and very visible afterwards, because
+  `RELAXATION_LADDER` drops `anyTags` at rung 2 and `tags` at rung 4. Without
+  this, the same query relaxes two rungs earlier depending on a coin toss.
+- `dropEmptyTerms()` removes a short stoplist of meal nouns ("dinners",
+  "leftovers", "meals") and the time words the minute bounds already spend
+  ("quick", "weeknight"). Terms are ANDed into the `WHERE` (§5.1), so
+  `minKeepsDays: 7` plus a term "leftovers" is a materially narrower search than
+  the cook typed, and the recipes it loses are lost for containing the wrong
+  noun. Deliberately tiny, and not a general stopword list: a word that
+  describes food stays, however common.
+
+**`.transform(unique)` became `.overwrite(unique)` in the contract.** Not a
+change to what a filter is — same input, same output, same dedupe. A Zod
+transform is *unrepresentable in JSON Schema*; `z.toJSONSchema()` throws on one,
+and the transport calls exactly that. Phase 2 could not have found this because
+nothing called the transport yet. The offline suite now pins the converted
+schema: 14 required properties, `additionalProperties: false`.
+
+### Two fixtures were wrong, and were changed rather than argued with
+
+Both were cases where the model's answer was defensible and mine was not.
+
+- *"slow cooker recipes for the weekend"* → the model read "for the weekend" as
+  a duration and set `minMinutes: 120`, which the prompt's own "an all-afternoon
+  braise is 120" rule half-licenses. The fixture is about the profile losing to
+  the query, so the ambiguity is gone: it is now *"slow cooker recipes"*.
+- *"something with minimal cleanup"* → `One cleanup` is a tag, so the query named
+  a tag by name and one prompt rule sent it to `tags` while another claimed the
+  whole effort group for that phrase. Two rules pointing opposite ways at one
+  phrase. The phrase left the prompt and the fixture together; the fixture is now
+  *"something that isn't much work"*.
+
+### What the tuning actually looked like
+
+Worth recording, because the shape of it is the finding. Eleven live runs:
+**16 → 25 → 26 → 28 → 27 → 26 → 25/28/26 → 25/26/27 → 28/28/29.**
+
+The first two jumps were real: the missing vocabularies, then the
+category/ingredient and effort-versus-speed rules. After that the failing
+*set* rotated on every run while the count sat at 26 ± 2 — different fixtures,
+same prompt. That is sampling variance dominating, at `temperature: 0`, and it
+is the reason the exit criterion is 27 of 30 rather than 30 of 30.
+
+One edit made things actively worse and is worth remembering: an "ORDER OF WORK"
+numbered checklist appended to the prompt dropped the score and, more seriously,
+made the model **honour the injected `freezerOnly: true`** in two runs of three.
+A procedural instruction to work through "what the query explicitly asks for"
+appears to re-frame an injected instruction as part of the query. It was
+reverted; the injection fixture has passed every run since.
+
+The last three changes — hardening the untrusted-data line against text that
+*names a filter field*, matching tags on meaning rather than spelling, and the
+`dropEmptyTerms` stoplist — took it to 28/28/29 and tuning stopped there. Past
+that point I would have been fitting the prompt to noise.
+
+### §10 open question 1, answered
+
+> Should `anyTags` groupings ("easy", "healthy", "impressive") be a curated
+> constant the model selects from, rather than free tag selection?
+
+**In effect, yes — and it already is, in the prompt rather than in a constant.**
+
+The evidence is `GROUPING_PROBES`, five queries the check script runs and prints
+without scoring, chosen precisely because the prompt does *not* name them. The
+fixtures cannot answer this question: the prompt spells the "easy" grouping out,
+so a fixture over "easy to make" measures instruction following. The probes
+measure judgement. Unaided, on the final prompt:
+
+| Probe | What the model did |
+|---|---|
+| "something healthy" | `unmappedTerms: ["healthy"]` — no grouping at all, though `High fiber`, `High protein` and `Vegetarian` were all available |
+| "something impressive for guests" | `unmappedTerms: ["guests","impressive"]` — nothing |
+| "comforting food for a cold night" | `tags: ["Comfort"]` — correct, but that is a *single tag lookup*, not a grouping |
+| "something I can eat at my desk" | `categories: ["No-reheat"]` once, `unmappedTerms: ["desk"]` another run — unstable |
+| "low effort dinners" | the full five-tag effort group, every run — the one the prompt names |
+
+So: the model reliably produces the grouping it is told about, and produces no
+grouping at all for the ones it is not. It does not invent sensible groupings on
+its own. An earlier prompt version did once answer "something healthy" with
+`["High fiber","High protein","Vegan option","Vegetarian"]`, which is a good
+grouping — but it did it once, and not again.
+
+The recommendation is therefore **not** to add a `TAG_GROUPS` constant now. The
+prompt is already the curation, it costs nothing extra, and there is exactly one
+grouping the corpus needs. Promote it to a constant when a second grouping earns
+its place — "healthy" is the obvious candidate — and at that point the constant
+should be shared, so Phase 5 can name the grouping in the results header
+("Showing low-effort recipes") instead of listing five tags.
+
+### Known gap
+
+The check script sends the **committed 90-name fixture vocabulary**, while Phase
+5 will send the ~554 canonical names on active recipes. A fixture that changes
+whenever the crawler finds a new ingredient is not a fixture, so this is the
+right trade — but it means the exclusion fixtures have not been exercised at
+production vocabulary size. `--live-vocabulary` runs exactly that, and prints a
+banner saying its count is information rather than the §7 exit criterion.
 
 The worktree is left dirty and uncommitted for review.
 
@@ -235,7 +425,8 @@ loudly instead of quietly degrading parse quality.
 over the raw query and say so. At operator scale a silent degradation to worse
 results is worse than an honest notice.
 
-The two below were settled during Phase 2, in code rather than in conversation.
+The two after them were settled during Phase 2, in code rather than in
+conversation.
 
 **A27 — `SEARCH_VOCAB_VERSION` is derived from the vocabulary, not hand-bumped.**
 It is `1-<FNV-1a of CATEGORIES and TAGS>`; the leading number is the shape of
@@ -253,6 +444,41 @@ satisfied by unknown data; an exclusion does not fire on unknown data" replaces
 everywhere §4.1 is unambiguous, and the restatement decides the cases it does
 not cover — `freezerOnly` and `categories` are requirements, so they drop nulls,
 even though neither is a numeric bound. Rationale in the Phase 2 log above.
+
+The three below were settled during Phase 3, all of them by watching the live
+model rather than by reasoning about it.
+
+**A29 — The canonical ingredient vocabulary is an input to the parse step.**
+`SearchFilter.excludeIngredients` takes exact `ingredients.name` values, 789 of
+them, too many for a JSON Schema enum — so the schema takes free strings and the
+*vocabulary* is supplied in the user payload instead, the way `map-ingredients.ts`
+supplies its own. Prompt rules alone cannot do it: the corpus splits one food
+across many rows, so "no chicken" must reach four names, and a model told to use
+"the plain generic name" emits `chicken`, which is on 2 recipes. Phase 5 passes
+the names on at least one active recipe (554 of 789); the rest cannot change a
+result and are pure prompt cost. No guard drops an unknown name — an unknown
+exclusion is already a SQL no-op, and an unknown inclusion *correctly* returns
+nothing.
+
+**A30 — The controlled vocabularies go in the prompt as well as the schema.**
+The strict `json_schema` enum stops the model returning a tag that does not
+exist; it does not tell it that `Cheap` and `Slow cooker` are things this
+collection has. The first live fixture run, before `CATEGORIES` and `TAGS` were
+stated in the prompt, scored 16 of 30 and put "cheap" and "high protein" in
+`unmappedTerms` with `tags` left empty. Adding them took it to 25. Same reason
+`derive-fields.ts` has always done it.
+
+**A31 — Three deterministic repairs sit between the model and the caller.**
+`repairTimeTags()` converts a `TIME_TAGS` entry into the `maxMinutes` it was
+standing in for (dropping it alone would turn "under 20 minutes" into no
+constraint; the loosest of several wins, per A18's direction) and *reports* the
+repair rather than swallowing it. `foldSingletonAnyTags()` moves a lone tag into
+`tags`, because over one element `@>` and `&&` are the same predicate but
+`RELAXATION_LADDER` drops them two rungs apart — without it the same query
+relaxes differently on a coin toss. `dropEmptyTerms()` removes a small stoplist
+of meal nouns and spent time words, because terms are ANDed into the `WHERE` and
+a stray "leftovers" narrows a search by the wrong noun. Each is a property the
+prompt asks for and code guarantees, in the spirit of A18's mapper guard.
 
 ---
 

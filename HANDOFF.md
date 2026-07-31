@@ -18,11 +18,21 @@ repository map, commands and working rules.
 carried over.
 
 **The next move has been chosen: natural-language search.** The design is settled
-in [`plans/FILTER_PLAN.md`](./plans/FILTER_PLAN.md) and the log starts at
-[`progress/FILTER_PLAN.md`](./progress/FILTER_PLAN.md), amendment A23. Begin at
-its Phase 1 — moving the OpenRouter transport to `@recipes/shared/llm`, a pure
-refactor across 17 importing modules whose exit criterion is that no test
-assertion changes.
+in [`plans/FILTER_PLAN.md`](./plans/FILTER_PLAN.md) and the log is
+[`progress/FILTER_PLAN.md`](./progress/FILTER_PLAN.md), amendments from A23.
+
+**Its Phase 1 is complete (2026-07-30, uncommitted at time of writing).** The
+OpenRouter transport now lives in `packages/shared/src/llm/` behind the
+server-only `@recipes/shared/llm` subpath, and `openai` is a dependency of
+`@recipes/shared`. Both files moved as 100%-similarity renames and no test
+assertion changed; the suite is still 712. The plan says "17 importing modules"
+in two places and the real number was 12 — the worker's `src/llm/index.ts`
+barrel absorbed the rest.
+
+**Next is its Phase 2** — the `SearchFilter` contract, the compiler that turns
+one into SQL, and migration `0004_search.sql`. No LLM is involved; the exit
+criterion is that a hand-authored filter for the plan's example query returns
+exactly the 12 recipes §1 names, through the compiler rather than by hand.
 
 The options below remain open and unstarted; none of them blocks the search work:
 
@@ -367,6 +377,14 @@ Each one has a plausible-looking wrong version, and most fail silently.
   nothing in `src/components` may. Client-facing types live in
   `src/lib/recipe-types.ts` and `@recipes/shared/planner` for exactly this
   reason.
+- **`@recipes/shared/llm` inherits that rule and is worse if broken.** It pulls
+  in the `openai` SDK, so a client import ships the provider SDK to the browser
+  and nothing errors — the page just gets fatter. Both subpaths are deliberately
+  absent from the package barrel, which is the only thing standing between an
+  `import … from '@recipes/shared'` in a component and that outcome. The check
+  is a production build plus a grep of `apps/web/.next/static` for `OpenAI` and
+  `openrouter.ai`; it was clean when the transport moved, and it stops being
+  free once `apps/web` has a real caller.
 - Keep the committed source HTML fixtures. Tests must never crawl.
 
 ---

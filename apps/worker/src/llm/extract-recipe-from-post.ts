@@ -5,7 +5,7 @@ import {
 import type {
   StructuredOutputCallOptions,
   StructuredOutputClient,
-} from './openrouter';
+} from '@recipes/shared/llm';
 import {
   toLlmRecipeDraft,
   type LlmRecipeDraft,

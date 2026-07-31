@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./env": "./src/env.ts",
+    "./llm": "./src/llm/index.ts",
     "./vocab": "./src/vocab.ts",
     "./units": "./src/units.ts",
     "./format": "./src/format.ts",
@@ -24,6 +25,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "openai": "^6.49.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

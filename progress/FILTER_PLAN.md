@@ -27,7 +27,7 @@ credential this plan needs.
 
 | Phase | State |
 |---|---|
-| 1 — Move the LLM transport to `@recipes/shared/llm` | ⬜ not started |
+| 1 — Move the LLM transport to `@recipes/shared/llm` | ✅ complete — 2026-07-30 |
 | 2 — `SearchFilter` contract, compiler, migration `0004_search.sql` | ⬜ not started |
 | 3 — The parse step and its fixtures | ⬜ not started |
 | 4 — Budget, accounting, `/ops` labelling | ⬜ not started |
@@ -36,6 +36,63 @@ credential this plan needs.
 Exit criteria for each are in `plans/FILTER_PLAN.md` §7. Verification baseline to
 beat, carried from the Phase 7 checkpoint: **712 tests passing** (shared 152, db
 20, worker 500, web 40), clean typecheck, passing production build.
+
+---
+
+## Phase 1 — Move the LLM transport ✅
+
+`openrouter.ts` and `usage.ts` now live in `packages/shared/src/llm/`, reachable
+only as `@recipes/shared/llm`. `openai@^6.49.0` is a dependency of
+`@recipes/shared`, matching the version the worker already had.
+
+**Exit criterion met, in the strong form the plan asked for.** `corepack pnpm
+test` with `DATABASE_URL` is **712 passing** (shared 152, db 20, web 40, worker
+500) and all four typechecks are clean. Git reports both moved files as
+**100%-similarity renames — zero insertions, zero deletions** — so the transport
+is byte-identical to what the worker was running, and the whole diff outside the
+two renames is fourteen files' worth of import lines plus a package manifest.
+No assertion was touched: the only test edits are the two import statements in
+`llm-openrouter.test.ts` collapsing into one (both halves now come from the same
+subpath) and one path in `reddit-postgres.integration.test.ts`.
+
+### Decisions
+
+**The worker's `src/llm/index.ts` barrel re-exports the shared subpath.** Its
+first two lines became `export * from '@recipes/shared/llm'`, and everything that
+addresses the transport through `../llm` — `personalization/{runtime,scoring,profile}.ts`,
+`reddit/postgres.ts`, `enrichment/runtime.ts`, `src/index.ts`, four test files
+and `scripts/run-personalization.ts` — was left completely untouched. The barrel
+is the seam that existed precisely so a move like this would not be a twenty-file
+diff; using it kept the blast radius at direct importers only.
+
+**`@recipes/shared/llm` is absent from the package barrel on purpose**, exactly
+as `./env` is, and the module header says why in the file rather than only here.
+It carries a second reason `./env` does not: it pulls in the `openai` SDK, and
+that landing in a browser bundle is the failure mode that would not announce
+itself. Verified rather than assumed — a production `next build` was run and
+`apps/web/.next/static` (34 files) greps clean for `openrouter.ai`, `OpenAI`,
+`createOpenRouterClient` and `StructuredOutputError`. That check is the one to
+repeat in Phase 5, when `apps/web` gains a real caller and the guarantee stops
+being free.
+
+### Correction to the plan
+
+**It was 12 files, not 17.** `plans/FILTER_PLAN.md` §2.2 and §7 both say "17
+importing modules"; the actual count of files importing the transport directly
+is 12 — ten under `apps/worker/src` and two tests. The figure evidently counted
+import *sites* or barrel consumers. Nothing follows from it, but the plan's
+number should not be trusted as a checklist.
+
+### Operational note
+
+The `packages/shared/package.json` change staled Compose's anonymous dependency
+volumes, refreshed with `docker compose build && docker compose rm -svf web
+worker migrate && docker compose up -d` — never `down -v`. The stack came back
+with `/api/health` reporting **425 recipes and 789 ingredients**, and the worker
+booted printing "OpenRouter configured", which is what proves the moved module
+resolves *inside the container* and not merely on the host.
+
+The worktree is left dirty and uncommitted for review.
 
 ---
 

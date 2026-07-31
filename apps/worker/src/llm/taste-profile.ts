@@ -18,7 +18,7 @@ import {
 import type {
   StructuredOutputCallOptions,
   StructuredOutputClient,
-} from './openrouter';
+} from '@recipes/shared/llm';
 
 const MAX_TITLE_CHARS = 200;
 const MAX_NOTES_CHARS = 600;

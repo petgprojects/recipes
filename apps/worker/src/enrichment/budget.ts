@@ -3,7 +3,7 @@ import { sql } from '@recipes/db/operators';
 import type {
   LlmRequestContext,
   StructuredOutputCallOptions,
-} from '../llm/openrouter';
+} from '@recipes/shared/llm';
 import {
   getDailyLlmUsage,
   recordLlmUsage,

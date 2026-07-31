@@ -16,6 +16,7 @@
     "./ratings": "./src/ratings.ts",
     "./personalization": "./src/personalization.ts",
     "./schemas": "./src/schemas.ts",
+    "./search": "./src/search.ts",
     "./ingredients": "./src/ingredients.ts",
     "./scan-jobs": "./src/scan-jobs.ts",
     "./data/*.json": "./src/data/*.json"

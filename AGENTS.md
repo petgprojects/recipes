@@ -16,7 +16,7 @@ checkpoint, read documents in this order:
 | Plan | Log | State |
 |---|---|---|
 | `plans/PLAN.md` | `progress/PLAN.md` | ✅ complete — Phases 0–7, amendments A1–A22 |
-| `plans/FILTER_PLAN.md` | `progress/FILTER_PLAN.md` | 🔨 current — NL search, amendments A23+ |
+| `plans/FILTER_PLAN.md` | `progress/FILTER_PLAN.md` | 🔨 current — NL search, Phases 1–2 done, amendments A23–A28 |
 
 Amendment numbering is continuous across plans, so "amendment A18" resolves to
 exactly one document. Inline `PLAN.md §4` citations in source comments refer to
@@ -27,8 +27,17 @@ Do not restart completed phases or re-research facts already recorded there.
 
 ## Current checkpoint
 
-- **Phase 0 through Phase 7 are complete.** Nothing is half-finished; the next
-  move is Peter's choice from `HANDOFF.md`'s options table.
+- **`PLAN.md` Phases 0–7 are complete**, and `FILTER_PLAN.md` Phases 1–2 are
+  too. Nothing is half-finished; the next move is that plan's **Phase 3**, the
+  parse step — the first phase of it that spends money.
+- **Natural-language search compiles, but nothing calls it yet.**
+  `@recipes/shared/search` owns the `SearchFilter` contract and
+  `apps/web/src/lib/search.ts` compiles one into SQL, with the relaxation ladder
+  and `searchRecipes()`. There is no prompt, no route and no UI. Two rules
+  govern every change to it, both in `HANDOFF.md` in full: time compiles to
+  `total_minutes` and never the `Under 20 min` tag, and the null convention is
+  **inverted** from `hardRuleFilter()` — a typed requirement drops null rows,
+  an exclusion does not fire on them.
 - The Phase 7 loop runs nightly as scan → Phase 2 enrichment → personalization,
   and per reader as hard rules (pure SQL, always) → soft profile → batched
   scoring. Rules are a `WHERE` clause with a visible per-rule switch (A20);
@@ -82,8 +91,10 @@ Do not restart completed phases or re-research facts already recorded there.
   image caching, persistence, pg-boss jobs and cron.
 - `packages/db` — Drizzle schema, migrations, seed and database client.
 - `packages/shared` — client-safe contracts, vocabularies, display formatting,
-  grocery bucket finalization and plain-text rendering, source configuration and
-  validated environment handling.
+  grocery bucket finalization and plain-text rendering, the `SearchFilter`
+  contract, source configuration and validated environment handling. Two
+  subpaths are server-only and deliberately absent from the barrel: `./env`,
+  and `./llm` (which pulls in the `openai` SDK).
 - `apps/web/test` — database-backed suites for the app's queries. Added in
   Phase 5; needs `DATABASE_URL` like the worker's integration tests.
 - `apps/worker/test/fixtures` — real committed source HTML. Keep it; tests must
@@ -255,11 +266,12 @@ issued for the old origin and will never be sent to the new one.
 
 ## Verification baseline
 
-At the Phase 7 checkpoint:
+Current, at FILTER_PLAN Phase 2:
 
-- `corepack pnpm test` (with `DATABASE_URL`) — 712 passing (shared 152, db 20,
-  worker 500, web 40). The root script runs packages one at a time on purpose;
-  see `HANDOFF.md`.
+- `corepack pnpm test` (with `DATABASE_URL`) — 762 passing (shared 167, db 20,
+  worker 500, web 75). The root script runs packages one at a time on purpose;
+  see `HANDOFF.md`. It was 712 at the Phase 7 checkpoint and through
+  FILTER_PLAN Phase 1; Phase 2 added 50 and changed no existing assertion.
 - `corepack pnpm typecheck` — clean across all workspaces.
 - Production Next.js build — passing.
 - `/api/health` — healthy with 425 recipes.

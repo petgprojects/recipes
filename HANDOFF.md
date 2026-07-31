@@ -21,18 +21,26 @@ carried over.
 in [`plans/FILTER_PLAN.md`](./plans/FILTER_PLAN.md) and the log is
 [`progress/FILTER_PLAN.md`](./progress/FILTER_PLAN.md), amendments from A23.
 
-**Its Phase 1 is complete (2026-07-30, uncommitted at time of writing).** The
-OpenRouter transport now lives in `packages/shared/src/llm/` behind the
-server-only `@recipes/shared/llm` subpath, and `openai` is a dependency of
-`@recipes/shared`. Both files moved as 100%-similarity renames and no test
-assertion changed; the suite is still 712. The plan says "17 importing modules"
-in two places and the real number was 12 — the worker's `src/llm/index.ts`
-barrel absorbed the rest.
+**Its Phases 1 and 2 are complete (2026-07-30, uncommitted at time of writing).**
 
-**Next is its Phase 2** — the `SearchFilter` contract, the compiler that turns
-one into SQL, and migration `0004_search.sql`. No LLM is involved; the exit
-criterion is that a hand-authored filter for the plan's example query returns
-exactly the 12 recipes §1 names, through the compiler rather than by hand.
+Phase 1 moved the OpenRouter transport into `packages/shared/src/llm/` behind
+the server-only `@recipes/shared/llm` subpath, as 100%-similarity renames with
+no assertion changed. The plan says "17 importing modules" in two places and the
+real number was 12 — the worker's `src/llm/index.ts` barrel absorbed the rest.
+
+Phase 2 added the `SearchFilter` contract (`packages/shared/src/search.ts`,
+client-safe and in the barrel), the compiler (`apps/web/src/lib/search.ts` —
+`WHERE`, `match_count`, the relaxation ladder and `searchRecipes()`), and
+migration `0004_search.sql`. **Its exit criterion is met**: the hand-authored
+filter for the plan's example query returns exactly the 12 recipes §1 names,
+through the compiler, verified against the live corpus and by dumping the
+compiler's emitted SQL and comparing it to §1's hand-written query. The suite
+went 712 → **762**; nothing existing changed. No LLM is involved anywhere in it.
+
+**Next is its Phase 3** — `apps/worker/src/llm/parse-search-query.ts`, the
+prompt and strict schema that produce a `SearchFilter` from a query string, plus
+~30 committed fixture pairs. That is the first phase of this plan that spends
+money.
 
 The options below remain open and unstarted; none of them blocks the search work:
 
@@ -130,8 +138,8 @@ off a screenshot are the correct ones to pass back.
   through 7 was removed.
 - OpenRouter spend to date ≈ **$0.32**.
 
-Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **712
-passing** (shared 152, db 20, worker 500, web 40); four typechecks clean;
+Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **762
+passing** (shared 167, db 20, worker 500, web 75); four typechecks clean;
 production build clean; all four secrets absent from `apps/web/.next/static`;
 `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file`,
 `POST /api/grocery`, `GET/POST /api/ratings`, `DELETE /api/ratings/:id` and
@@ -154,6 +162,51 @@ panel, and the full Phase 7 loop — three derived rules took browse from 235 to
 ## Invariants — these will bite you
 
 Each one has a plausible-looking wrong version, and most fail silently.
+
+### Search (FILTER_PLAN Phase 2, A27, A28)
+
+- **Time compiles to `total_minutes`, never to the `Under 20 min` tag.** 12
+  recipes carry the tag; 34 satisfy the column. Trusting the tag silently loses
+  two thirds of the matches and returns twelve plausible recipes while doing it.
+  The tag vocabulary is for concepts with no column; where a column exists, the
+  column wins.
+- **The null convention is inverted from `hardRuleFilter()`, on purpose.** A
+  requirement is not satisfied by unknown data — "under 20 minutes" drops the
+  recipe with no time, and "freezes well" drops the 144 with no
+  `freezer_months`. An exclusion does not fire on unknown data. A hard rule was
+  *inferred* from ratings and deserves the benefit of the doubt; a search was
+  *typed*, and a null is not a yes. Both directions are pinned by tests, because
+  both wrong versions return a believable number of rows.
+- **Ingredient constraints and every `exclude*` field are never relaxed.**
+  They appear nowhere in `RELAXATION_LADDER` and must stay out of it. Returning
+  mushroom recipes to someone who said "no mushrooms" because nothing else
+  matched is worse than returning nothing.
+- **Ingredients match `ingredients.name` exactly, in both directions** — never
+  the trigram or alias path `recipe_ingredients` uses. Canonical `chicken` is on
+  2 recipes and `chicken broth` on 22; a fuzzy include answers the wrong
+  question and a fuzzy exclude hides recipes with no way to find out.
+- **`match_count` is computed from the *un-relaxed* filter while `where` uses
+  the relaxed one.** That mismatch is the feature: once a criterion is dropped
+  the `WHERE` can no longer rank the rows that met it, and ranking them first is
+  the only reason §4.3 sorts on the column.
+- **A bare integer in an `ORDER BY` is a positional reference.** An empty filter
+  compiled `order by 0 desc` and the query failed outright. It is `0::int`.
+- **`ftsDocument()` must stay character-for-character identical to
+  `recipes_search_fts_idx`.** Change the coalesce, the separator or the
+  regconfig and the query still returns the right rows — by sequential scan.
+  `search.integration.test.ts` EXPLAINs the compiler's own clause inside a
+  transaction with `enable_seqscan` off and asserts the index name appears.
+- **Search does not apply hard rules (§4.2), and cannot.** `searchRecipes()`
+  takes no `hardRules` option, so there is none to forget to pass. Scores are
+  *not* overridden — they stay as the tiebreak.
+- **`scan_runs.kind` is not decoration.** `source_id is null` already means "a
+  run spanning every source"; do not reuse that null as the search
+  discriminator, or Phase 4's separate budget cannot be built.
+- **`SEARCH_VOCAB_VERSION` is meant to break the build** (A25, A27). It is
+  derived from `CATEGORIES` and `TAGS` and pinned literally in
+  `packages/shared/test/search.test.ts`. When it goes red, go and look at
+  whether the Phase 3 fixtures still say what they meant, *then* paste the new
+  value in. Not the other way round.
 
 ### Personalization, the model half (A21)
 

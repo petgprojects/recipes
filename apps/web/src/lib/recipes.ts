@@ -68,7 +68,16 @@ export interface ListRecipesOptions {
   userId?: string | null;
 }
 
-const summaryColumns = {
+/**
+ * Exported for `lib/search.ts` and nothing else.
+ *
+ * Search results are rendered by the same card as the browse feed, so they have
+ * to be the same rows — a second column list that merely resembled this one
+ * would drift, and the symptom would be a search result missing its photo or
+ * its score reason. Same reason `listRecipes()` and the server-rendered page
+ * share a function rather than a resemblance.
+ */
+export const summaryColumns = {
   id: recipes.id,
   slug: recipes.slug,
   title: recipes.title,
@@ -106,7 +115,7 @@ const summaryColumns = {
  * `initialData` is no longer safe. Postgres discards a `false` join condition,
  * so this costs nothing.
  */
-function scoreJoin(userId: string | null | undefined) {
+export function scoreJoin(userId: string | null | undefined) {
   return userId === null || userId === undefined
     ? sql`false`
     : and(eq(recipeScores.recipeId, recipes.id), eq(recipeScores.userId, userId));
@@ -123,17 +132,24 @@ function scoreJoin(userId: string | null | undefined) {
  * coalesces to the same number, and the order is exactly what it was before
  * Phase 7 touched this query.
  */
-const scoreOrder = desc(sql`coalesce(${recipeScores.score}, ${NEUTRAL_SCORE}::real)`);
+export const scoreOrder = desc(sql`coalesce(${recipeScores.score}, ${NEUTRAL_SCORE}::real)`);
+
+/** The cold-start keys under the score, shared with the search ordering (§4.3). */
+export const browseTiebreakOrder = [
+  desc(sql`coalesce(${recipes.publishedAt}, ${recipes.firstSeenAt})`),
+  desc(sql`coalesce(${recipes.sourceRating}, 0)`),
+  desc(recipes.id),
+] as const;
 
 /** The database-side shape of {@link summaryColumns}: timestamps still Dates. */
-type SummaryRow = Omit<RecipeSummary, 'publishedAt' | 'firstSeenAt' | 'lastSeenAt' | 'tags'> & {
+export type SummaryRow = Omit<RecipeSummary, 'publishedAt' | 'firstSeenAt' | 'lastSeenAt' | 'tags'> & {
   tags: string[] | null;
   publishedAt: Date | null;
   firstSeenAt: Date;
   lastSeenAt: Date;
 };
 
-function toSummary(row: SummaryRow): RecipeSummary {
+export function toSummary(row: SummaryRow): RecipeSummary {
   return {
     ...row,
     tags: row.tags ?? [],
@@ -172,12 +188,7 @@ export async function listRecipes(options: ListRecipesOptions = {}): Promise<Rec
         hardRuleFilter(options.hardRules ?? []),
       ),
     )
-    .orderBy(
-      scoreOrder,
-      desc(sql`coalesce(${recipes.publishedAt}, ${recipes.firstSeenAt})`),
-      desc(sql`coalesce(${recipes.sourceRating}, 0)`),
-      desc(recipes.id),
-    )
+    .orderBy(scoreOrder, ...browseTiebreakOrder)
     .limit(limit);
 
   return rows.map(toSummary);

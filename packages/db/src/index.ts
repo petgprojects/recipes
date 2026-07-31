@@ -15,3 +15,4 @@ export { db, client, createClient, type Database, type Schema } from './client';
 // Re-exported so consumers get the operator set that matches this exact
 // drizzle-orm version, without adding drizzle-orm to their own package.json.
 export { and, asc, desc, eq, gt, gte, ilike, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
+export type { SQL } from 'drizzle-orm';

@@ -15,6 +15,7 @@ export * from './planner';
 export * from './ratings';
 export * from './personalization';
 export * from './schemas';
+export * from './search';
 export * from './ingredients';
 export * from './blog-sources';
 export * from './reddit-sources';

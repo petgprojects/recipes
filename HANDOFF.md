@@ -5,9 +5,9 @@ the personalization loop runs end to end and was verified live against the real
 provider.
 
 This file is **not** a history — it holds only what still constrains the code.
-`PROGRESS.md` is the archive: every amendment (A1–A22), why each decision was
-made, and a log entry per phase. Read that when you need the reasoning behind a
-rule here, or before reopening a settled decision. `AGENTS.md` has the
+`progress/PLAN.md` is the archive: every amendment (A1–A22), why each decision
+was made, and a log entry per phase. Read that when you need the reasoning behind
+a rule here, or before reopening a settled decision. `AGENTS.md` has the
 repository map, commands and working rules.
 
 ---
@@ -15,7 +15,16 @@ repository map, commands and working rules.
 ## Start here
 
 **Phases 0 through 7 are complete.** There is no half-finished work and nothing
-carried over. The next move is a decision rather than a task, and it is Peter's:
+carried over.
+
+**The next move has been chosen: natural-language search.** The design is settled
+in [`plans/FILTER_PLAN.md`](./plans/FILTER_PLAN.md) and the log starts at
+[`progress/FILTER_PLAN.md`](./progress/FILTER_PLAN.md), amendment A23. Begin at
+its Phase 1 — moving the OpenRouter transport to `@recipes/shared/llm`, a pure
+refactor across 17 importing modules whose exit criterion is that no test
+assertion changes.
+
+The options below remain open and unstarted; none of them blocks the search work:
 
 | Option | What it is |
 | --- | --- |

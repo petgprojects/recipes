@@ -4,10 +4,24 @@ This file is the quick orientation layer for coding agents. For the full
 checkpoint, read documents in this order:
 
 1. `HANDOFF.md` — current state, verified facts, credentials and exact next move.
-2. `PROGRESS.md` — authoritative amendments and phase checklist.
-3. The relevant sections of `PLAN.md` — original design; `PROGRESS.md`
-   overrides it when they disagree.
+2. The `progress/` log for the plan you are working on — authoritative amendments
+   and phase checklist.
+3. The relevant sections of the matching `plans/` document — original design; the
+   progress log overrides it when they disagree.
 4. `reqs.md` when a product decision or acceptance criterion is unclear.
+
+**Plans and their logs pair up by filename**: `plans/X.md` is designed work,
+`progress/X.md` is what actually happened to it.
+
+| Plan | Log | State |
+|---|---|---|
+| `plans/PLAN.md` | `progress/PLAN.md` | ✅ complete — Phases 0–7, amendments A1–A22 |
+| `plans/FILTER_PLAN.md` | `progress/FILTER_PLAN.md` | 🔨 current — NL search, amendments A23+ |
+
+Amendment numbering is continuous across plans, so "amendment A18" resolves to
+exactly one document. Inline `PLAN.md §4` citations in source comments refer to
+`plans/PLAN.md`; they are citations, not paths, and were deliberately left
+un-rewritten when the file moved.
 
 Do not restart completed phases or re-research facts already recorded there.
 
@@ -74,14 +88,16 @@ Do not restart completed phases or re-research facts already recorded there.
   Phase 5; needs `DATABASE_URL` like the worker's integration tests.
 - `apps/worker/test/fixtures` — real committed source HTML. Keep it; tests must
   not crawl the internet.
-- `PROGRESS.md` — durable implementation log and task checklist. Update it when
-  a stage changes state.
+- `plans/` — design documents, one per plan.
+- `progress/` — durable implementation log and task checklist, one per plan,
+  paired by filename. Update the current one when a stage changes state.
 
 ## Working rules
 
 - Always create a task list, keep it current, and mark every item complete when
   finished.
-- Keep `PROGRESS.md` and `HANDOFF.md` accurate after meaningful checkpoints.
+- Keep the current `progress/` log and `HANDOFF.md` accurate after meaningful
+  checkpoints.
 - Prefer one reviewable commit per stage.
 - Use tightly scoped synchronous subagents for implementation when useful, then
   independently verify their claims.

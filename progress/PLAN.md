@@ -1,9 +1,15 @@
 # Build Progress
 
-Durable checkpoint log for the build described in [`PLAN.md`](./PLAN.md).
-Each phase lands as its own commit (or several). This file records **what is
-done**, **what was decided that differs from PLAN.md**, and **what is blocked
-on Peter**.
+Durable checkpoint log for the build described in
+[`../plans/PLAN.md`](../plans/PLAN.md). Each phase lands as its own commit (or
+several). This file records **what is done**, **what was decided that differs
+from PLAN.md**, and **what is blocked on Peter**.
+
+> **Closed 2026-07-30.** Phases 0–7 are complete and this log is the archived
+> record of them, including amendments **A1–A22** — which are still live
+> constraints cited by `AGENTS.md` and by source comments, so this file is
+> reference material, not history to be pruned. Current work continues in
+> [`FILTER_PLAN.md`](./FILTER_PLAN.md) at amendment A23.
 
 ---
 

@@ -118,7 +118,17 @@ describe('getSearchAvailability', () => {
     // Only meaningful from an open budget; the corpus's normal state.
     expect(before.available).toBe(true);
 
+    // **The accumulator this returns is very likely a real one** — one row per
+    // UTC day, shared with every search a human has run today, carrying money
+    // that was actually spent. So the prior value is snapshotted and put back,
+    // not zeroed. Restoring to 0 destroyed a day's accounting once, and the
+    // tokens on the row made it obvious afterwards: 49,616 tokens at $0.
     const runId = await getOrCreateDailySearchRun(db);
+    const [prior] = (await db.execute(
+      sql`select cost_usd::double precision as cost from scan_runs where id = ${runId}::uuid`,
+    )) as unknown as { cost: number }[];
+    const priorCost = prior?.cost ?? 0;
+
     // Deliberately not exactly the gate. `scan_runs.cost_usd` is
     // `numeric(12,6)`, so a JS product like 0.1 × 0.9 = 0.09000000000000001
     // rounds to 0.090000 on the way in and reads back *below* the number it was
@@ -146,10 +156,12 @@ describe('getSearchAvailability', () => {
       );
       expect((await getSearchAvailability()).available).toBe(true);
     } finally {
-      // The accumulator is a real durable row and this test's spend was
-      // fictional; put it back rather than leaving a day's budget consumed.
-      await db.execute(sql`update scan_runs set cost_usd = 0 where id = ${runId}::uuid`);
+      // Back to whatever was there, which may be real money. Not zero.
+      await db.execute(
+        sql`update scan_runs set cost_usd = ${priorCost} where id = ${runId}::uuid`,
+      );
     }
+    expect((await getDailyLlmUsage(db, 'search')).costUsd).toBeCloseTo(priorCost, 6);
   });
 
   it('leaves the enrichment pot alone — the pots are the point (Phase 4)', async () => {

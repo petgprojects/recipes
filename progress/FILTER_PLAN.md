@@ -29,14 +29,16 @@ configured and is the only credential this plan needs.
 | 3 — The parse step and its fixtures | ✅ complete — 2026-07-30 |
 | 4 — Budget, accounting, `/ops` labelling | ✅ complete — 2026-07-30 |
 | 5 — `/api/search`, search bar, URL state | ✅ complete — 2026-07-31 |
+| 6 — `anyIngredients`, from a live bug report | ✅ complete — 2026-07-31 |
 
-**All five phases are complete.** Exit criteria for each are in
-`plans/FILTER_PLAN.md` §7. Verification baseline after Phase 5: **1,832 tests
-passing** (shared 181, db 20, worker 1,539, web 92), clean typecheck, passing
-production build. It was 712 at the Phase 7 checkpoint and at the end of Phase
-1; Phase 2 added 50, Phase 3 added 65, Phase 4 added 9, the stress extension
-took it to 1,806 and Phase 5 added 26 — none of them changing an existing
-assertion.
+**All six phases are complete.** Exit criteria for 1–5 are in
+`plans/FILTER_PLAN.md` §7; Phase 6 is not in the plan at all — it came from the
+first real search a human ran against the deployed feature. Verification
+baseline: **1,849 tests passing** (shared 181, db 20, worker 1,551, web 97),
+clean typecheck, passing production build. It was 712 at the Phase 7 checkpoint
+and at the end of Phase 1; Phase 2 added 50, Phase 3 added 65, Phase 4 added 9,
+the stress extension took it to 1,806, Phase 5 added 26 and Phase 6 another 17 —
+none of them changing an existing assertion.
 
 ---
 
@@ -672,6 +674,131 @@ records real spend and is what the daily budget reads. Every probe
 
 ---
 
+## Phase 6 — `anyIngredients` ✅
+
+**Not in the plan.** It exists because the first real question a human asked the
+shipped search bar — *"anything with turkey in it"* — came back with **one**
+recipe, and the corpus has five.
+
+### What was actually wrong
+
+`SearchFilter` had `tags` (all) and `anyTags` (any), and §3.1 argues that pair
+at length: "quick vegetarian" is a conjunction, "easy to make" is one property
+five tags each partially satisfy, and collapsing them makes one of the two
+return nothing. It then gives ingredients only the conjunction.
+
+The corpus makes that omission expensive, because **one food is split across
+several canonical rows**. Measured on the live corpus:
+
+| Filter for "turkey" | Recipes |
+|---|---|
+| `ingredients: ['turkey']` | **1** |
+| `ingredients: [all four turkey names]` | **0** — no recipe has all four |
+| `categories: ['Beef & Turkey']` | 29, of which **2** contain turkey |
+| `anyIngredients: [all four names]` | **5** — every one there is |
+
+So the parse step had two moves and both were wrong. Name one canonical and
+undersell the corpus five to one, or reach for the category and hand someone who
+asked for turkey 27 beef recipes. It picked the first, and — this is the part
+that matters — **nothing said so**. One result, no relaxation, no notice: a
+confidently wrong shortlist, which is the exact failure the prompt's own header
+paragraph warns about.
+
+### What shipped
+
+`anyIngredients` in the contract, compiled by the same `hasAnyIngredient()` the
+exclusion already used, with `SEARCH_VOCAB_VERSION` hand-bumped to `2-` because
+its leading number is the shape of `SearchFilter`. Deliberately **not** on
+`RELAXATION_LADDER`, even though `anyTags` is rung 2: `anyTags` is fuzzy by
+construction, so dropping it drops an interpretation, while `anyIngredients` is
+a disjunction only because the corpus splits one food — the cook said turkey and
+meant turkey.
+
+**Exit criterion, in the browser:** *"anything with turkey in it"* now returns
+**5 recipes**, and the live model parses it to exactly the four-name disjunction
+with no category. `"meals with mushrooms"` returns 6 through
+`['mushrooms', 'oyster mushrooms']`.
+
+### The prompt fought back twice, and the second one was mine
+
+Both were caught by the new `--anchors` run and neither by any test.
+
+- **The first live run put the same ten chicken names in `anyIngredients` *and*
+  `excludeIngredients`** for "no chicken" — "contains chicken and contains no
+  chicken", which is an empty page for the most ordinary exclusion there is.
+  Fixed in the prompt *and* guaranteed by `dropContradictoryIngredients()`, a
+  fourth deterministic repair in the A31 spirit. The exclusion wins and the
+  include side is dropped: showing someone the food they just said to leave out
+  is the unrecoverable direction (§3.2).
+- **Then my own fix regressed "no chicken" into `categories: ['Chicken']`** —
+  worse still, a page of exactly what they refused. Rewriting the
+  category paragraph to lead with *direction* ("asking for a food can set
+  categories; refusing one sets excludeCategories and must never set
+  categories") cleared it.
+
+### Beef and turkey are not alike, and the prompt had to be told
+
+The rule "a category naming two foods is not either of them" is tidy and wrong.
+Measured: of the 29 `Beef & Turkey` recipes, roughly **10** carry a beef
+canonical — so the category has *better* recall for beef than the ingredient
+rows do, and nearly all of it is beef. Only **2** contain turkey, while 5 turkey
+recipes exist corpus-wide, the rest filed under Soup, Breakfast and Chicken.
+
+So beef uses the category in both directions and turkey uses it in neither, and
+the prompt states that as a fact about this collection rather than deriving it.
+Same move as A30: the model cannot see these counts.
+
+### Two fixtures were wrong again, and were changed rather than argued with
+
+Exactly the Phase 3 pattern. `STRESS_FOOD_FAMILIES` was written with six
+families; `onions` (`red onion`, `yellow onion`) and `cumin` (`cumin`,
+`ground cumin`) came out again the same afternoon. The model added `shallot`,
+`scallions` and `onion powder` to onions in four phrasings out of four, and kept
+cumin and ground cumin apart — which the prompt's own derived-product rule
+half-licenses. Whether a shallot is an onion is not a question this repository
+can settle by asserting an answer. They were **nine of the eleven** disagreements
+in the first `--anchors` run. The four that remain — turkey, mushrooms, bell
+peppers, olive oil — are all measured and none is arguable.
+
+### `--anchors`, a check worth running after every prompt edit
+
+The full 1,000-case matrix costs about **$0.27**, which is enough to make nobody
+run it. `scripts/check-search-parse.ts --anchors` runs the thirty hand-authored
+fixtures plus every food-family case in both directions — 66 calls, about
+**$0.02**, under a minute. The pairing is the point: the thirty catch an edit
+*breaking* something and the families catch it not doing the thing it was written
+for. Both halves earned their place immediately, since the thirty are what
+caught the `categories`/`excludeCategories` regression.
+
+Two runs on the final prompt scored **62/66 and 60/66** against a 60 threshold,
+with the failing *set* rotating between them — the documented `temperature: 0`
+behaviour, and the point at which the Phase 3 log says to stop tuning.
+
+### One more thing the browser caught
+
+While a search was in flight the empty state read **"Nothing matched"** over
+"Searching…". A search can take twenty seconds, and for all of them the page was
+asserting an answer it did not have. It says "Searching…" now. Small, and the
+same confidently-wrong failure the notices exist to prevent.
+
+### A test that destroyed real data, briefly
+
+The Phase 5 budget-gate test restored `scan_runs.cost_usd` to **0** in its
+`finally`, and the row it was writing to is the *shared* daily accumulator — so
+one `pnpm test` wiped a day of real search spend. The tokens on the row are what
+made it obvious: 49,616 tokens at $0.00. It snapshots and restores the prior
+value now, and asserts the restore. Worth stating as a rule: a test that writes
+to a durable accumulator must put back what it found, not what it assumes.
+
+### Cost
+
+About **$0.11** across Phase 6 — three `--anchors` runs at ~$0.02 each plus a
+dozen single-query probes. The full matrix was deliberately **not** re-run; at
+$0.27 it is a decision rather than a step, and `--anchors` exists so that
+decision is rarely needed.
+
+---
+
 ## Stress evaluation — complete — 2026-07-30
 
 The original 30 hand-authored parse fixtures remain as regression anchors. The
@@ -834,6 +961,25 @@ whole conjunction unsatisfiable however good the other terms are.
 `numnode(...) > 0` filters them out. A TypeScript copy of the stopword list was
 rejected for the grocery list's reason: two copies of one vocabulary in two
 languages drift, and the symptom is wrong output nobody can see is wrong.
+
+The last one came from a reader, not from the plan.
+
+**A39 — `ingredients` needed a disjunction, because the corpus splits one food
+across several canonical rows.** §3.1 argues the any-versus-all case in full for
+tags and never makes it for ingredients; the corpus makes it sharper there, not
+softer. "turkey" is four canonical names on five recipes, so a conjunction
+returns nothing, one name returns one recipe, and the `Beef & Turkey` category
+returns 29 of which two are turkey. `anyIngredients` is the field that can ask
+the question. It is **not** on `RELAXATION_LADDER` even though `anyTags` is:
+`anyTags` is fuzzy by construction, so relaxing it drops an interpretation,
+while this is a disjunction only because of how the data is filed — the cook
+said turkey and meant turkey. Three consequences worth carrying: the leading
+number of `SEARCH_VOCAB_VERSION` is hand-bumped to `2-` because the *shape*
+changed while the vocabularies did not; `dropContradictoryIngredients()` is a
+fourth deterministic repair, because the first live run asked for and refused
+the same ten chicken names at once; and a food that is only *part* of a
+multi-food category needs the corpus's actual numbers stated in the prompt,
+because beef and turkey sit in one category and are nothing alike in it.
 
 ---
 

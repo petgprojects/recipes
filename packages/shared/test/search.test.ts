@@ -228,7 +228,7 @@ describe('SEARCH_VOCAB_VERSION (A25)', () => {
    * the new value in. Do not paste it in first.
    */
   it('is the fingerprint of the vocabulary the fixtures were written against', () => {
-    expect(SEARCH_VOCAB_VERSION).toBe('1-723fe8e6');
+    expect(SEARCH_VOCAB_VERSION).toBe('2-723fe8e6');
   });
 
   it('changes when the vocabulary does', () => {

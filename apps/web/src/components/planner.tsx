@@ -365,12 +365,24 @@ export function Planner({
                 {/* A search that found nothing is not an empty database, and
                     §4.4's ladder has already been down two rungs by the time
                     this renders — so this is the genuine empty state it ends
-                    with, and the notices above say what was tried. */}
-                <h3>{searching ? 'Nothing matched' : 'Nothing here yet'}</h3>
-                <p>
+                    with, and the notices above say what was tried.
+
+                    While it is still running the heading must not say
+                    "Nothing matched": a search can take twenty seconds, and
+                    for all of them the page would be asserting an answer it
+                    does not have yet. Seen in the browser, and it is the same
+                    confidently-wrong failure the notices exist to prevent. */}
+                <h3>
                   {searching
                     ? searchQuery.isFetching
                       ? 'Searching…'
+                      : 'Nothing matched'
+                    : 'Nothing here yet'}
+                </h3>
+                <p>
+                  {searching
+                    ? searchQuery.isFetching
+                      ? 'Reading your query and looking through the collection.'
                       : source.length === 0
                         ? 'No recipes match that, even after loosening it. Try fewer constraints, or a different ingredient.'
                         : `Nothing in ${category.toLowerCase()} matched. The other chips still have results.`

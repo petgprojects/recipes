@@ -108,7 +108,14 @@ function ftsDocument(): SQL {
 export type { RelaxableField, Relaxation } from '@recipes/shared/search';
 
 /** Every criterion a filter can contribute, for `match_count` and the `WHERE`. */
-type CriterionKey = RelaxableField | 'excludeCategories' | 'excludeTags' | 'ingredients' | 'excludeIngredients' | `term:${string}`;
+type CriterionKey =
+  | RelaxableField
+  | 'excludeCategories'
+  | 'excludeTags'
+  | 'ingredients'
+  | 'anyIngredients'
+  | 'excludeIngredients'
+  | `term:${string}`;
 
 interface Criterion {
   key: CriterionKey;
@@ -164,6 +171,13 @@ function criteriaFor(filter: SearchFilter): Criterion[] {
   if (filter.ingredients.length > 0) {
     add('ingredients', hasAllIngredients(filter.ingredients));
   }
+  // A39, and exactly parallel to `anyTags` above: the corpus splits one food
+  // across several canonical rows, so "turkey" is a disjunction over four
+  // names. Requiring all four returns nothing, and naming one returns a fifth
+  // of the answer.
+  if (filter.anyIngredients.length > 0) {
+    add('anyIngredients', hasAnyIngredient(filter.anyIngredients));
+  }
   if (filter.excludeIngredients.length > 0) {
     add('excludeIngredients', sql`not ${hasAnyIngredient(filter.excludeIngredients)}`);
   }
@@ -189,6 +203,12 @@ function criteriaFor(filter: SearchFilter): Criterion[] {
  * `lower()` on both sides is case folding, not fuzzing — the schema already
  * lowercases the filter's names, and every canonical name in the corpus is
  * lowercase. It costs nothing and survives a capitalised name arriving later.
+ *
+ * `hasAnyIngredient()` serves two callers with opposite signs: `anyIngredients`
+ * uses it as written, `excludeIngredients` negates it. That is not a
+ * coincidence to be tidied — "any of these names is present" is exactly the
+ * question both ask, and A39's whole finding is that the *inclusion* side had
+ * no way to ask it.
  */
 function hasAnyIngredient(names: readonly string[]): SQL {
   return sql`exists (
@@ -288,6 +308,14 @@ export const TIME_WIDEN_FACTOR = 1.5;
  * of nothing but tags and categories would exhaust both rounds on fields it
  * never had. Ingredients and exclusions appear nowhere in this table on
  * purpose.
+ *
+ * **`anyIngredients` is not on it either, even though `anyTags` is rung 2.**
+ * The two are the same *shape* and not the same kind of claim. `anyTags` is
+ * fuzzy by construction — the model chose five tags to stand in for one vague
+ * word like "easy", so dropping it drops an interpretation. `anyIngredients` is
+ * a disjunction only because the corpus splits one food across several rows
+ * (A39); the cook said "turkey" and meant turkey, and relaxing it would serve
+ * them something else entirely. Same §4.4 reason `ingredients` is absent.
  */
 const RELAXATION_LADDER: readonly (readonly RelaxableField[])[] = [
   ['minKeepsDays', 'freezerOnly', 'minServings'],

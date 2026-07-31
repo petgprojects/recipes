@@ -41,7 +41,7 @@ import { CATEGORIES, TAGS } from '@recipes/shared/vocab';
  * new value in. Not the other way round — that is the whole reason a derived
  * constant exists rather than a hand-bumped integer.
  */
-export const FIXTURE_VOCAB_VERSION = '1-723fe8e6';
+export const FIXTURE_VOCAB_VERSION = '2-723fe8e6';
 
 /**
  * The canonical ingredient names the fixtures supply to the model.
@@ -60,7 +60,13 @@ export const FIXTURE_VOCAB_VERSION = '1-723fe8e6';
  *   - `mushrooms` alongside `oyster mushrooms`, so a single-word exclusion has
  *     to find both;
  *   - `ground beef` alongside `beef broth`, the same derived-product trap in a
- *     second family so one prompt sentence is not carrying one example.
+ *     second family so one prompt sentence is not carrying one example;
+ *   - the four turkey names, added 2026-07-31 for amendment A39. They are the
+ *     case that found the missing field: turkey is on five active recipes
+ *     spread across four canonicals, so `ingredients` returns one of them and
+ *     `anyIngredients` returns all five. They are also the family that is *not*
+ *     a category — `Beef & Turkey` is 29 recipes and only two contain turkey —
+ *     which is the second half of the rule the prompt now states.
  */
 export const FIXTURE_INGREDIENT_VOCABULARY: readonly string[] = [
   'all-purpose flour',
@@ -117,6 +123,7 @@ export const FIXTURE_INGREDIENT_VOCABULARY: readonly string[] = [
   'ground beef',
   'ground chicken',
   'ground cumin',
+  'ground turkey',
   'heavy cream',
   'honey',
   'hot sauce',
@@ -144,12 +151,15 @@ export const FIXTURE_INGREDIENT_VOCABULARY: readonly string[] = [
   'scallions',
   'shallot',
   'shrimp',
+  'shredded turkey',
   'smoked paprika',
   'sour cream',
   'soy sauce',
   'spaghetti',
   'sweet potatoes',
   'tomato paste',
+  'turkey',
+  'turkey breast',
   'water',
   'white rice',
   'yellow onion',
@@ -191,7 +201,12 @@ function fixture(
   return { query, profile, expected: makeSearchFilter(expected), note };
 }
 
-const LEGACY_SEARCH_QUERY_FIXTURES: readonly SearchQueryFixture[] = [
+/**
+ * The thirty hand-authored anchors, exported for the check script's `--anchors`
+ * mode (A39). Every one is derivable from the prompt by hand, which the
+ * generated matrix around them is not in the same way.
+ */
+export const LEGACY_SEARCH_QUERY_FIXTURES: readonly SearchQueryFixture[] = [
   // ── The plan's own example (§1) ───────────────────────────────────────────
   // Compiled, this filter returns exactly the twelve recipes §1 names — the
   // Phase 2 exit criterion, now reached from a sentence instead of by hand.
@@ -358,16 +373,73 @@ const LEGACY_SEARCH_QUERY_FIXTURES: readonly SearchQueryFixture[] = [
  * keeps one interpretation dominant, so a live mismatch is useful evidence
  * about parsing rather than an argument over what the sentence meant.
  */
+/**
+ * Foods with exactly one entry in the fixture vocabulary.
+ *
+ * These are the names for which "with X" is unambiguously `ingredients: [X]`:
+ * there is no second form of the same food to gather up, so A39's disjunction
+ * has nothing to disjoin and {@link foldSingletonAnyIngredients} normalises the
+ * spelling either way.
+ *
+ * `bell peppers`, `cumin`, `mushrooms` and `olive oil` left this list on
+ * 2026-07-31 and moved to {@link STRESS_FOOD_FAMILIES}. They were always
+ * ambiguous — each has a second entry that is the same food — and the old
+ * expectations pinned only one of the two. The specific forms
+ * (`oyster mushrooms`, `red bell pepper`) stay here, because naming the
+ * specific form *is* naming one item.
+ */
 const STRESS_INGREDIENTS = [
-  'avocados', 'baby spinach', 'bacon', 'bell peppers', 'cabbage', 'capers',
+  'avocados', 'baby spinach', 'bacon', 'cabbage', 'capers',
   'carrots', 'cherry tomatoes', 'chickpeas', 'chili powder', 'cilantro',
-  'cream cheese', 'cumin', 'eggplant', 'feta', 'fresh basil', 'fresh ginger',
+  'cream cheese', 'eggplant', 'feta', 'fresh basil', 'fresh ginger',
   'garlic cloves', 'goat cheese', 'heavy cream', 'honey', 'jalapeño', 'lemons',
-  'limes', 'maple syrup', 'miso paste', 'mushrooms', 'olive oil',
+  'limes', 'maple syrup', 'miso paste',
   'oyster mushrooms', 'panko breadcrumbs', 'red bell pepper', 'red onion',
   'red pepper flakes', 'russet potatoes', 'scallions', 'shrimp', 'soy sauce',
   'spaghetti', 'sweet potatoes', 'tomato paste', 'white rice', 'zucchini',
 ] as const;
+
+/**
+ * Foods the vocabulary splits across several entries — amendment A39's case.
+ *
+ * A query naming one of these names the *food*, so it is a disjunction over
+ * every entry that is that food, and a recipe need only hold one of them.
+ * Each group is exactly what `FIXTURE_INGREDIENT_VOCABULARY` holds for that
+ * food and nothing else: a derived product stays out (`beef broth` is not
+ * beef), and so does a different food that shares a word (`sweet potatoes` are
+ * not `russet potatoes`).
+ *
+ * `turkey` is the group this field was added for. `chicken` is deliberately
+ * absent even though the vocabulary splits it four ways, because chicken *is* a
+ * category and the prompt sends a whole category there instead.
+ */
+const STRESS_FOOD_FAMILIES: readonly (readonly [string, readonly string[]])[] = [
+  ['turkey', ['turkey', 'ground turkey', 'turkey breast', 'shredded turkey']],
+  ['mushrooms', ['mushrooms', 'oyster mushrooms']],
+  ['bell peppers', ['bell peppers', 'red bell pepper']],
+  ['olive oil', ['olive oil', 'extra virgin olive oil']],
+];
+
+/**
+ * Two families were written here on 2026-07-31 and taken back out the same
+ * afternoon, because the live model disagreed and **it had the better argument**
+ * — the same call Phase 3 made twice, and for the same reason.
+ *
+ *   - `onions` → `['red onion', 'yellow onion']`. The model reached for
+ *     `shallot`, `scallions` and `onion powder` as well, in four phrasings out
+ *     of four. Whether a shallot is an onion is a question this file cannot
+ *     settle by asserting an answer, and the prompt does not determine it.
+ *   - `cumin` → `['cumin', 'ground cumin']`. The model kept them apart, which
+ *     the prompt's own "a form made from it is a different grocery item" rule
+ *     half-licenses.
+ *
+ * Between them they were nine of the eleven disagreements in the first
+ * `--anchors` run. The four above are all measured against the corpus and all
+ * unambiguous: a turkey breast is turkey, an oyster mushroom is a mushroom.
+ * The header of this file states the standard being applied — "a fixture whose
+ * expectation the prompt does not determine is not a test, it is a coin toss
+ * with a red light attached."
+ */
 
 const STRESS_TAGS = TAGS.filter((tag) => !TIME_TAGS.includes(tag));
 const STRESS_CATEGORIES = [...CATEGORIES];
@@ -470,6 +542,14 @@ function buildStressFixtures(): SearchQueryFixture[] {
       add(form(ingredient), { ingredients: [ingredient] }, 'exact ingredient');
     }
   }
+  // A39: a food the vocabulary splits several ways is a disjunction. Asking for
+  // all of them at once is zero recipes and asking for one is a fraction of the
+  // answer, so these pin the whole group.
+  for (const [food, names] of STRESS_FOOD_FAMILIES) {
+    for (const form of ingredientForms) {
+      add(form(food), { anyIngredients: [...names] }, 'a food family, not one canonical');
+    }
+  }
 
   const exclusionForms = [
     (name: string) => `recipes without ${name}`,
@@ -480,6 +560,14 @@ function buildStressFixtures(): SearchQueryFixture[] {
   for (const ingredient of STRESS_INGREDIENTS) {
     for (const form of exclusionForms) {
       add(form(ingredient), { excludeIngredients: [ingredient] }, 'exact ingredient exclusion');
+    }
+  }
+  // Exclusion has always reached the whole family — the prompt has said so
+  // since Phase 3. These are the same groups from the other side, which is what
+  // makes the pair of rules readable as one rule.
+  for (const [food, names] of STRESS_FOOD_FAMILIES) {
+    for (const form of exclusionForms) {
+      add(form(food), { excludeIngredients: [...names] }, 'a food family excluded whole');
     }
   }
 
@@ -595,7 +683,15 @@ export function assertFixturesWellFormed(): void {
   for (const { query, expected } of SEARCH_QUERY_FIXTURES) {
     if (seen.has(query)) throw new Error(`duplicate fixture query: ${query}`);
     seen.add(query);
-    for (const name of [...expected.ingredients, ...expected.excludeIngredients]) {
+    // All three ingredient fields, not two. `anyIngredients` was added in A39
+    // and an unchecked field here would let a fixture expect a name the model
+    // is never shown — which fails as drift, on every run, for a reason the
+    // drift report cannot explain.
+    for (const name of [
+      ...expected.ingredients,
+      ...expected.anyIngredients,
+      ...expected.excludeIngredients,
+    ]) {
       if (!vocabulary.has(name)) {
         throw new Error(
           `fixture "${query}" expects the canonical ingredient "${name}", which is not in ` +
@@ -603,6 +699,28 @@ export function assertFixturesWellFormed(): void {
         );
       }
     }
+    // A39's fold: a lone name means the same thing in either field, so the
+    // committed spelling has to be the one `foldSingletonAnyIngredients()`
+    // produces, or the fixture reports drift on a correct answer.
+    if (expected.anyIngredients.length === 1) {
+      throw new Error(
+        `fixture "${query}" expects a single-name anyIngredients, which the parse step folds ` +
+          'into `ingredients`. Expect it there instead.',
+      );
+    }
+  }
+
+  // The matrix is sliced to FIXTURE_COUNT, so a block added above this one can
+  // silently push another block past the cut. A39's whole case would then stop
+  // being covered while every test still passed.
+  const families = SEARCH_QUERY_FIXTURES.filter(
+    (candidate) => candidate.expected.anyIngredients.length > 1,
+  );
+  if (families.length < STRESS_FOOD_FAMILIES.length) {
+    throw new Error(
+      `only ${families.length} food-family fixtures survived the slice to ${FIXTURE_COUNT}; ` +
+        'A39 needs at least one per family. Raise FIXTURE_COUNT or trim another block.',
+    );
   }
 }
 
@@ -627,6 +745,7 @@ export function normalizeFilter(filter: SearchFilter): SearchFilter {
     anyTags: sorted(filter.anyTags),
     excludeTags: sorted(filter.excludeTags),
     ingredients: sorted(filter.ingredients),
+    anyIngredients: sorted(filter.anyIngredients),
     excludeIngredients: sorted(filter.excludeIngredients),
     unmappedTerms: sorted(filter.unmappedTerms),
   };

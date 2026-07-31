@@ -16,7 +16,7 @@ checkpoint, read documents in this order:
 | Plan | Log | State |
 |---|---|---|
 | `plans/PLAN.md` | `progress/PLAN.md` | ✅ complete — Phases 0–7, amendments A1–A22 |
-| `plans/FILTER_PLAN.md` | `progress/FILTER_PLAN.md` | ✅ complete — NL search, Phases 1–5, amendments A23–A38 |
+| `plans/FILTER_PLAN.md` | `progress/FILTER_PLAN.md` | ✅ complete — NL search, Phases 1–6, amendments A23–A39 |
 
 Amendment numbering is continuous across plans, so "amendment A18" resolves to
 exactly one document. Inline `PLAN.md §4` citations in source comments refer to
@@ -27,7 +27,7 @@ Do not restart completed phases or re-research facts already recorded there.
 
 ## Current checkpoint
 
-- **`PLAN.md` Phases 0–7 and `FILTER_PLAN.md` Phases 1–5 are all complete.**
+- **`PLAN.md` Phases 0–7 and `FILTER_PLAN.md` Phases 1–6 are all complete.**
   Nothing is half-finished and no phase is queued; `HANDOFF.md` lists the open
   options.
 - **Natural-language search works end to end.** `@recipes/shared/search` owns
@@ -41,19 +41,23 @@ Do not restart completed phases or re-research facts already recorded there.
   the URL state. Three rules govern every change to it, all in `HANDOFF.md` in
   full: time compiles to `total_minutes` and never the `Under 20 min` tag; the
   null convention is **inverted** from `hardRuleFilter()` — a typed requirement
-  drops null rows, an exclusion does not fire on them; and hard rules are named
-  in a notice but never applied.
+  drops null rows, an exclusion does not fire on them; hard rules are named in a
+  notice but never applied; and a *food* is `anyIngredients` while a specific
+  *item* is `ingredients`, because the corpus files one food under several
+  canonical names (A39).
 - **Search and enrichment budgets are separate and durable.**
   `@recipes/db/llm-budget` is the one implementation both apps use; every read
   and write requires `kind='scan' | 'search'`. Scan keeps advisory key 2 and
   search uses key 3. `SEARCH_DAILY_BUDGET_USD` defaults to `$0.10`, about 175
   measured searches per UTC day. `/ops` labels the successful day-rolling
   search row while its UTC-day tile correctly remains total spend.
-- **The parse step is graded by a script that spends money.** 30 committed
+- **The parse step is graded by a script that spends money.** 1,000 committed
   fixtures in `apps/worker/test/fixtures/search-queries.ts` run offline in
   `pnpm test`, and `apps/worker/scripts/check-search-parse.ts` runs the same
-  pairs against the live model — opt-in, never part of `pnpm test`, ~$0.009 a
-  run, currently agreeing on 28–29 of 30.
+  pairs against the live model — opt-in, never part of `pnpm test`. **Use
+  `--anchors`**: the thirty hand-authored cases plus every food family, 66 calls
+  and ~$0.02, against ~$0.27 for the full matrix. It scores 60–62 of 66 and the
+  failing set rotates; that is `temperature: 0` sampling, not a regression.
 - The Phase 7 loop runs nightly as scan → Phase 2 enrichment → personalization,
   and per reader as hard rules (pure SQL, always) → soft profile → batched
   scoring. Rules are a `WHERE` clause with a visible per-rule switch (A20);
@@ -284,14 +288,14 @@ issued for the old origin and will never be sent to the new one.
 
 ## Verification baseline
 
-Current, at FILTER_PLAN Phase 5:
+Current, at FILTER_PLAN Phase 6:
 
-- `corepack pnpm test` (with `DATABASE_URL`) — 1,832 passing (shared 181, db 20,
-  worker 1,539, web 92). The root script runs packages one at a time on purpose;
+- `corepack pnpm test` (with `DATABASE_URL`) — 1,849 passing (shared 181, db 20,
+  worker 1,551, web 97). The root script runs packages one at a time on purpose;
   see `HANDOFF.md`. It was 712 at the Phase 7 checkpoint and through
   FILTER_PLAN Phase 1; Phase 2 added 50, Phase 3 another 65, Phase 4 another 9,
-  the 1,000-case stress extension took it to 1,806 and Phase 5 added 26 —
-  without changing an existing assertion.
+  the 1,000-case stress extension took it to 1,806, Phase 5 added 26 and
+  Phase 6 another 17 — without changing an existing assertion.
 - `corepack pnpm typecheck` — clean across all workspaces.
 - Production Next.js build — passing, and `apps/web/.next/static` greps clean
   for `OpenAI`, `openrouter.ai`, `createOpenRouterClient` and

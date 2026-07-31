@@ -318,6 +318,97 @@ describe('ingredients match exactly, in both directions', () => {
   });
 });
 
+// ── anyIngredients: one food, several canonicals (A39) ──────────────────────
+
+/**
+ * The case that found the missing field, kept as data rather than as prose.
+ *
+ * A reader asked "anything with turkey in it" through the shipped Phase 5 route
+ * and got **one** recipe. The corpus has five. Every number below is asserted
+ * against an independent query, so this stays a test rather than a story about
+ * one afternoon.
+ */
+describe('a food the corpus splits across several canonicals', () => {
+  const TURKEY = ['turkey', 'ground turkey', 'turkey breast', 'shredded turkey'];
+
+  const hasName = (name: string) =>
+    sql`exists (
+      select 1 from recipe_ingredients ri join ingredients i on i.id = ri.ingredient_id
+       where ri.recipe_id = r.id and i.name = ${name}
+    )`;
+
+  let disjunctionTitles = new Set<string>();
+  beforeAll(async () => {
+    const { recipes: rows } = await searchRecipes(makeSearchFilter({ anyIngredients: TURKEY }));
+    disjunctionTitles = new Set(rows.map((recipe) => recipe.title));
+  });
+
+  it('is genuinely split: no one canonical holds the whole food', async () => {
+    const perName = await Promise.all(TURKEY.map((name) => count(hasName(name))));
+    const anyOf = await count(
+      sql`exists (
+        select 1 from recipe_ingredients ri join ingredients i on i.id = ri.ingredient_id
+         where ri.recipe_id = r.id and i.name = any(${sql`array[${sql.join(
+           TURKEY.map((n) => sql`${n}`),
+           sql`, `,
+         )}]::text[]`})
+      )`,
+    );
+
+    expect(anyOf).toBeGreaterThan(Math.max(...perName));
+    // Four names, five recipes, and the largest single name is on two of them.
+    expect(anyOf).toBe(perName.reduce((sum, n) => sum + n, 0));
+  });
+
+  it('returns every one of them, where `ingredients` returns a fraction', async () => {
+    const disjunction = await searchRecipes(makeSearchFilter({ anyIngredients: TURKEY }));
+    const oneName = await searchRecipes(makeSearchFilter({ ingredients: ['turkey'] }));
+
+    expect(disjunction.recipes.length).toBeGreaterThan(oneName.recipes.length);
+    expect(oneName.recipes.length).toBe(await count(hasName('turkey')));
+    expect(disjunction.recipes.length).toBe(
+      await count(sql`(${sql.join(TURKEY.map(hasName), sql` or `)})`),
+    );
+  });
+
+  it('is not the same question as the conjunction, which is empty here', async () => {
+    // The move the contract used to force: name the whole family in
+    // `ingredients` and demand one recipe hold all four.
+    const conjunction = await searchRecipes(makeSearchFilter({ ingredients: TURKEY }));
+    expect(conjunction.recipes).toHaveLength(0);
+  });
+
+  it('beats the category, which is mostly the other meat', async () => {
+    const category = await searchRecipes(makeSearchFilter({ categories: ['Beef & Turkey'] }));
+    const withTurkey = category.recipes.filter((recipe) =>
+      disjunctionTitles.has(recipe.title),
+    );
+
+    // The category is the wrong answer in both directions at once: far more
+    // rows than asked for, and most of the actual turkey is somewhere else.
+    expect(category.recipes.length).toBeGreaterThan(disjunctionTitles.size);
+    expect(withTurkey.length).toBeLessThan(disjunctionTitles.size);
+  });
+
+  it('is never relaxed, however little it returns (§4.4)', async () => {
+    // A cook who said "turkey" meant turkey. Combined with a bound nothing can
+    // satisfy, the ladder gives up the *time* and keeps the food — the same
+    // rule that keeps `ingredients` and every exclusion off the ladder.
+    //
+    // The type system makes the stronger version of this claim already:
+    // `Relaxation`'s `field` is `RelaxableField`, and `anyIngredients` is not
+    // one, so a rung that dropped it would not compile. What this asserts is
+    // the consequence — every row that comes back is still a turkey recipe.
+    const outcome = await searchRecipes(
+      makeSearchFilter({ anyIngredients: TURKEY, maxMinutes: 5 }),
+    );
+    expect(outcome.relaxations.length).toBeGreaterThan(0);
+    for (const recipe of outcome.recipes) {
+      expect(disjunctionTitles.has(recipe.title)).toBe(true);
+    }
+  });
+});
+
 // ── Unmapped terms (§5) ─────────────────────────────────────────────────────
 
 describe('unmapped terms', () => {

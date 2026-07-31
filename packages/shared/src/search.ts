@@ -60,8 +60,10 @@ export interface SearchFilter {
   /** Include, **any** may match — "easy to make". See §3.1. */
   anyTags: Tag[];
   excludeTags: Tag[];
-  /** Canonical `ingredients.name`, all must be present. */
+  /** Canonical `ingredients.name`, **all** must be present. */
   ingredients: string[];
+  /** Canonical `ingredients.name`, **any** may match — see {@link ANY_INGREDIENTS_NOTE}. */
+  anyIngredients: string[];
   /** Canonical `ingredients.name`, exact only — see §3.2. */
   excludeIngredients: string[];
   minServings: number | null;
@@ -84,6 +86,40 @@ export interface SearchFilter {
  */
 export const TIME_TAGS: readonly Tag[] = ['10 minutes', '30 minutes', 'Under 20 min'];
 
+/**
+ * Why `anyIngredients` exists, stated where it will be read (amendment A39).
+ *
+ * §3.1 makes this argument in full for tags — "quick vegetarian" is a
+ * conjunction of two properties, "easy to make" is one property five tags each
+ * partially satisfy, and collapsing them makes one of the two return nothing —
+ * and then never makes it for ingredients. It is the same argument, and the
+ * corpus makes it sharper rather than softer, because **one food is split
+ * across several canonical rows.**
+ *
+ * Measured on the live corpus on 2026-07-31, for "anything with turkey in it":
+ *
+ * | Filter | Recipes |
+ * |---|---|
+ * | `ingredients: ['turkey']` | **1** |
+ * | `ingredients: [all four turkey names]` | **0** — no recipe has all four |
+ * | `categories: ['Beef & Turkey']` | 29, of which **2** contain turkey |
+ * | `anyIngredients: [all four turkey names]` | **5** — the right answer |
+ *
+ * So before this field the parse step had two moves and both were wrong: name
+ * one canonical and undersell the corpus five to one, or reach for the category
+ * and return 27 beef recipes to someone who asked for turkey. The prompt
+ * already tells the model to name every entry of a food family when
+ * *excluding*, because exclusion is a disjunction; this is the same instruction
+ * finally being available in the other direction.
+ *
+ * Not relaxable, alongside `ingredients` and every `exclude*` field: see the
+ * note on `RELAXATION_LADDER`.
+ */
+export const ANY_INGREDIENTS_NOTE =
+  'A food that the corpus splits across several canonical names — "turkey" is ' +
+  'also "ground turkey", "turkey breast" and "shredded turkey" — is a ' +
+  'disjunction, not a conjunction.';
+
 export const EMPTY_SEARCH_FILTER: SearchFilter = Object.freeze({
   maxMinutes: null,
   minMinutes: null,
@@ -94,6 +130,7 @@ export const EMPTY_SEARCH_FILTER: SearchFilter = Object.freeze({
   anyTags: [],
   excludeTags: [],
   ingredients: [],
+  anyIngredients: [],
   excludeIngredients: [],
   minServings: null,
   minKeepsDays: null,
@@ -159,6 +196,7 @@ export const searchFilterSchema = z.object({
   anyTags: tagList,
   excludeTags: tagList,
   ingredients: ingredientList,
+  anyIngredients: ingredientList,
   excludeIngredients: ingredientList,
   minServings: z.number().int().positive().max(1000).nullable(),
   minKeepsDays: z.number().int().positive().max(365).nullable(),
@@ -193,6 +231,7 @@ export function isEmptySearchFilter(filter: SearchFilter): boolean {
     filter.anyTags.length === 0 &&
     filter.excludeTags.length === 0 &&
     filter.ingredients.length === 0 &&
+    filter.anyIngredients.length === 0 &&
     filter.excludeIngredients.length === 0 &&
     filter.unmappedTerms.length === 0
   );
@@ -445,8 +484,12 @@ function fingerprint(input: string): string {
  * prevent.
  *
  * The leading number is the *shape* of `SearchFilter` and is bumped by hand
- * when a field is added or removed; the suffix is derived.
+ * when a field is added or removed; the suffix is derived. It went to **2** on
+ * 2026-07-31, when `anyIngredients` was added (A39) — the vocabularies did not
+ * move, so the fingerprint did not either, and without the hand bump a
+ * fourteen-field filter and a fifteen-field one would have claimed the same
+ * version.
  */
-export const SEARCH_VOCAB_VERSION = `1-${fingerprint(
+export const SEARCH_VOCAB_VERSION = `2-${fingerprint(
   `categories:${CATEGORIES.join('|')}\ntags:${TAGS.join('|')}`,
 )}`;

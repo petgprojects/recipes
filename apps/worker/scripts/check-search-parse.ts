@@ -38,6 +38,7 @@ import {
 import {
   FIXTURE_INGREDIENT_VOCABULARY,
   GROUPING_PROBES,
+  LEGACY_SEARCH_QUERY_FIXTURES,
   SEARCH_QUERY_FIXTURES,
   assertFixturesWellFormed,
   filterDiff,
@@ -45,8 +46,30 @@ import {
   type SearchQueryFixture,
 } from '../test/fixtures/search-queries';
 
-/** Phase 5's 90% route gate, applied to this larger diagnostic suite. */
-const AGREEMENT_THRESHOLD = Math.ceil(SEARCH_QUERY_FIXTURES.length * 0.9);
+/**
+ * What to run. The full matrix is the thorough answer and costs about $0.27;
+ * `--anchors` is the one to reach for after a prompt edit (A39).
+ *
+ * The anchors are the thirty hand-authored fixtures — the plan's own exit
+ * criterion — plus every fixture that exercises a food family in either
+ * direction. That pairing is deliberate: the thirty catch a prompt edit
+ * *breaking* something, and the families catch it not doing the thing it was
+ * written for. Around sixty calls, roughly $0.02, and short enough that it is
+ * reasonable to run it after every change to the INGREDIENTS section rather
+ * than once at the end.
+ */
+function selectFixtures(anchorsOnly: boolean): readonly SearchQueryFixture[] {
+  if (!anchorsOnly) return SEARCH_QUERY_FIXTURES;
+  const families = SEARCH_QUERY_FIXTURES.filter(
+    (candidate) =>
+      candidate.expected.anyIngredients.length > 1 ||
+      candidate.expected.excludeIngredients.length > 1,
+  );
+  const chosen = [...LEGACY_SEARCH_QUERY_FIXTURES, ...families];
+  return chosen.filter(
+    (candidate, index) => chosen.findIndex((f) => f.query === candidate.query) === index,
+  );
+}
 
 /** Bounded so the stress run does not hammer the provider. */
 const CONCURRENCY = 4;
@@ -72,6 +95,9 @@ async function main(): Promise<void> {
   assertFixturesWellFormed();
 
   const useLiveVocabulary = process.argv.includes('--live-vocabulary');
+  const anchorsOnly = process.argv.includes('--anchors');
+  const fixtures = selectFixtures(anchorsOnly);
+  const threshold = Math.ceil(fixtures.length * 0.9);
   const vocabulary = useLiveVocabulary
     ? await activeCanonicalIngredients()
     : FIXTURE_INGREDIENT_VOCABULARY;
@@ -97,12 +123,13 @@ async function main(): Promise<void> {
   };
 
   console.log(
-    `Model ${env.OPENROUTER_MODEL}, ${SEARCH_QUERY_FIXTURES.length} fixtures, ` +
+    `Model ${env.OPENROUTER_MODEL}, ${fixtures.length} fixtures` +
+      `${anchorsOnly ? ' (--anchors: the hand-authored thirty plus every food family)' : ''}, ` +
       `${vocabulary.length} canonical ingredients ` +
       `(${useLiveVocabulary ? 'live, from the corpus' : 'committed fixture vocabulary'}).\n`,
   );
 
-  const outcomes = await inPool(SEARCH_QUERY_FIXTURES, CONCURRENCY, async (fixture) => {
+  const outcomes = await inPool(fixtures, CONCURRENCY, async (fixture) => {
     try {
       const { filter, repairedTimeTags } = await parseSearchQuery(counted, {
         query: fixture.query,
@@ -195,7 +222,7 @@ async function main(): Promise<void> {
 
   console.log(
     `\nAgreed on ${agreed.length} of ${outcomes.length}` +
-      ` (threshold ${AGREEMENT_THRESHOLD}).` +
+      ` (threshold ${threshold}).` +
       `\nTime-tag repairs: ${repaired.length}` +
       (repaired.length === 0
         ? ' — the §1 trap never fired.'
@@ -211,7 +238,7 @@ async function main(): Promise<void> {
     );
     return;
   }
-  if (agreed.length < AGREEMENT_THRESHOLD) {
+  if (agreed.length < threshold) {
     process.exitCode = 1;
   }
 }

@@ -1,9 +1,9 @@
 # Session Handoff
 
 Current state and the next move. Updated 2026-07-31, after natural-language
-search **Phase 5** closed — the plan is complete end to end: a sentence typed
-into the running app reaches the right recipes, and says what it gave up to get
-there.
+search **Phase 6** closed — the plan is complete end to end, and then one more
+phase the plan never contained, because the first real search a human ran
+against the shipped feature returned one recipe where the corpus had five.
 
 This file is **not** a history — it holds only what still constrains the code.
 `progress/PLAN.md` is the archive: every amendment (A1–A22), why each decision
@@ -22,8 +22,10 @@ carried over.
 in [`plans/FILTER_PLAN.md`](./plans/FILTER_PLAN.md) and the log is
 [`progress/FILTER_PLAN.md`](./progress/FILTER_PLAN.md), amendments from A23.
 
-**All five of its phases are complete** — 1 through 4 on 2026-07-30 and Phase 5
-on 2026-07-31, on branch `filters`.
+**All six of its phases are complete** — 1 through 4 on 2026-07-30, Phase 5 on
+2026-07-31, and Phase 6 the same day, on branch `filters`. Phase 6 is not in
+`plans/FILTER_PLAN.md`: it is `anyIngredients`, and it exists because the
+feature was used.
 
 Phase 1 moved the OpenRouter transport into `packages/shared/src/llm/` behind
 the server-only `@recipes/shared/llm` subpath, as 100%-similarity renames with
@@ -67,6 +69,15 @@ example query returns the same 12 recipes through the running app; the URL is
 shareable, one back press restores a previous query, and all four notices plus
 the disabled state were seen in a browser. The full account is in the progress
 log's Phase 5 section — read that before changing any of it.
+
+Phase 6 added **`anyIngredients`**, and it is the one phase that came from use
+rather than from design. "anything with turkey in it" returned one recipe; the
+corpus has five, spread across four canonical names. `ingredients` is a
+conjunction, so the parse step could name one name (a fifth of the answer) or
+reach for `Beef & Turkey` (29 rows, two of them turkey) — and nothing told the
+reader either way. §3.1 makes exactly this any-versus-all argument for tags and
+never made it for ingredients. Amendment **A39**, with a fourth deterministic
+repair and a cheap `--anchors` mode on the check script.
 
 **There is no next phase in this plan.** The options below are open and
 unstarted:
@@ -121,9 +132,16 @@ part of `pnpm test`. The committed suite has 1,000 cases; the live script uses
 the Phase 5 90% gate and prints field-level drift summaries:
 
 ```bash
+docker compose exec worker ./node_modules/.bin/tsx scripts/check-search-parse.ts --anchors
 docker compose exec worker ./node_modules/.bin/tsx scripts/check-search-parse.ts
 docker compose exec worker ./node_modules/.bin/tsx scripts/check-search-parse.ts --live-vocabulary
 ```
+
+**Reach for `--anchors` first.** It is the thirty hand-authored fixtures plus
+every food-family case — 66 calls, about **$0.02**, under a minute — against the
+full matrix's **$0.27**. Run it after any edit to the prompt's INGREDIENTS or
+CATEGORIES sections; it is what caught both Phase 6 regressions, and the full
+matrix is a decision rather than a step.
 
 It spends real money without `--rules-only`. A full 235-recipe scoring pass for
 one reader is 12 provider calls and cost **$0.0093** measured; budget several
@@ -172,20 +190,21 @@ off a screenshot are the correct ones to pass back.
   `saved_recipes`, **0** `grocery_checks`, **0** `cook_logs`, **0**
   `user_preferences`, **0** `recipe_scores` — every probe row from Phases 4
   through 7 was removed.
-- **1 `kind='search'` scan row**, for 2026-07-31, at **$0.006970** over 49,616
-  in / 3,486 out. That is the Phase 5 browser check's real spend, and it is the
-  UTC day's accumulator — left in place deliberately, because it records money
-  that was actually spent and is what the daily budget reads.
-- OpenRouter spend to date ≈ **$0.71** — the prior ≈ $0.70 plus Phase 5's ≈
-  $0.008 of live searches. The 1,000-case stress run used
+- **1 `kind='search'` scan row**, for 2026-07-31, at **$0.008567**. That is the
+  Phase 5 and Phase 6 browser checks' real spend, and it is the UTC day's
+  accumulator — left in place deliberately, because it records money that was
+  actually spent and is what the daily budget reads.
+- OpenRouter spend to date ≈ **$0.82** — the prior ≈ $0.70, plus ≈ $0.008 of
+  Phase 5 searches and ≈ $0.11 of Phase 6 (three `--anchors` runs and a dozen
+  single-query probes; the $0.27 full matrix was deliberately not re-run). The 1,000-case stress run used
   `SEARCH_DAILY_BUDGET_USD=5` only on its `docker compose exec` process; the
   repository default and `.env` remain unchanged.
 - A search costs **$0.00057–0.00064** measured through the real route, which is
   exactly Phase 3's estimate — about **160–175 searches per UTC day** at the
   `$0.10` default.
 
-Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **1,832
-passing** (shared 181, db 20, worker 1,539, web 92); all four typechecks clean;
+Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **1,849
+passing** (shared 181, db 20, worker 1,551, web 97); all four typechecks clean;
 production build clean; all four secrets absent from `apps/web/.next/static`,
 and so are `OpenAI`, `openrouter.ai`, `createOpenRouterClient` and
 `StructuredOutputError`; `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`,
@@ -206,7 +225,11 @@ flow, the `PLAN.md` Phase 5 grocery tab both signed in and signed out, the Phase
 235 to 74, in strict score order from 100 down to 10, every card carrying its
 reason.
 
-And, on 2026-07-31, all of `FILTER_PLAN.md` Phase 5: the example query returning
+And, on 2026-07-31, `FILTER_PLAN.md` Phase 6: "anything with turkey in it"
+returning **5 recipes** through `anyIngredients` where it had returned one, and
+"meals with mushrooms" returning 6 through both mushroom canonicals.
+
+And, the same day, all of `FILTER_PLAN.md` Phase 5: the example query returning
 its 12 recipes from a typed sentence, a shareable `?q=` URL, one back press
 restoring a previous query with its results and notices, chips narrowing within
 results (91 → 25) and resetting to *All* on a new search, all four notices on
@@ -219,7 +242,7 @@ browse carried on working.
 
 Each one has a plausible-looking wrong version, and most fail silently.
 
-### Search (FILTER_PLAN Phases 2–5, A27, A28, A32, A33, A35–A38)
+### Search (FILTER_PLAN Phases 2–6, A27, A28, A32, A33, A35–A39)
 
 - **Time compiles to `total_minutes`, never to the `Under 20 min` tag.** 12
   recipes carry the tag; 34 satisfy the column. Trusting the tag silently loses
@@ -236,7 +259,34 @@ Each one has a plausible-looking wrong version, and most fail silently.
 - **Ingredient constraints and every `exclude*` field are never relaxed.**
   They appear nowhere in `RELAXATION_LADDER` and must stay out of it. Returning
   mushroom recipes to someone who said "no mushrooms" because nothing else
-  matched is worse than returning nothing.
+  matched is worse than returning nothing. **`anyIngredients` is off the ladder
+  too**, even though `anyTags` is rung 2 — `anyTags` is fuzzy by construction,
+  so relaxing it drops an interpretation, while `anyIngredients` is a
+  disjunction only because the corpus files one food under several names. The
+  cook said turkey and meant turkey.
+- **A food is a disjunction; a specific item is a conjunction** (A39). The
+  corpus splits one food across canonical rows, so "turkey" is four names on
+  five recipes: `ingredients` with all four is **zero** recipes, `ingredients`
+  with one is **one**, and `categories: ['Beef & Turkey']` is 29 of which two
+  contain turkey. Only `anyIngredients` asks the question that was asked. This
+  is the same argument §3.1 makes for `anyTags`, which the plan simply never
+  made for ingredients.
+- **`Beef & Turkey` behaves differently for its two foods, and the prompt says
+  so with numbers.** Roughly 10 of its 29 recipes carry a beef canonical, so the
+  category has *better* recall for beef than the ingredient rows do and beef
+  uses it in both directions. Two contain turkey while five turkey recipes exist
+  corpus-wide, so turkey uses it in neither — asking gets a page of beef, and
+  excluding throws away beef nobody objected to. The model cannot see these
+  counts; deriving the rule instead of stating it produced the bug.
+- **A name can never be in an include field and `excludeIngredients` at once.**
+  `dropContradictoryIngredients()` guarantees it and the exclusion wins. The
+  first live run after A39 answered "no chicken" with the same ten names in
+  `anyIngredients` *and* `excludeIngredients` — "contains chicken and contains
+  no chicken", an empty page for the most ordinary exclusion there is.
+- **A refused food must never reach `categories`.** The obvious fix for the
+  above regressed "no chicken" into `categories: ['Chicken']`, which is a page
+  of exactly what was refused. The prompt now leads with direction rather than
+  with the food.
 - **Ingredients match `ingredients.name` exactly, in both directions** — never
   the trigram or alias path `recipe_ingredients` uses. Canonical `chicken` is on
   2 recipes and `chicken broth` on 22; a fuzzy include answers the wrong
@@ -277,7 +327,14 @@ Each one has a plausible-looking wrong version, and most fail silently.
 - **The paid parse diagnostic is outside the search pot.**
   `scripts/check-search-parse.ts` opens no `scan_runs` row by design; routing it
   through the budget would let a diagnostic consume the next day's search
-  allowance.
+  allowance. Its `--anchors` mode is the one to run routinely: 66 calls and
+  ~$0.02 against the full matrix's ~$0.27, and it is what caught both of
+  Phase 6's regressions.
+- **A test that writes to a durable accumulator must restore what it found.**
+  The Phase 5 budget-gate test reset `scan_runs.cost_usd` to `0` in its
+  `finally`, and that row is the *shared* daily search accumulator — one
+  `pnpm test` erased a day of real spend. It snapshots and restores now. The
+  tokens left on the row are what made it visible: 49,616 tokens at $0.00.
 - **The parse prompt lives in `@recipes/shared/llm`, not the worker** (A35).
   It is the only task prompt that does, because its only caller is the web
   route and `apps/web` must not import `@recipes/worker`. It inherits the
@@ -317,11 +374,16 @@ Each one has a plausible-looking wrong version, and most fail silently.
   90% gate cannot be tested exactly on its boundary. Real spend arrives in
   ~$0.00057 steps and crosses it within one search either way.
 - **`SEARCH_VOCAB_VERSION` is meant to break the build** (A25, A27). It is
-  derived from `CATEGORIES` and `TAGS` and pinned literally in
-  `packages/shared/test/search.test.ts` *and* in
-  `apps/worker/test/fixtures/search-queries.ts`. When it goes red, go and look
-  at whether the Phase 3 fixtures still say what they meant, *then* paste the
-  new value in. Not the other way round.
+  derived from `CATEGORIES` and `TAGS` and pinned literally in **three** places:
+  `packages/shared/test/search.test.ts`,
+  `apps/worker/test/fixtures/search-queries.ts` and
+  `apps/worker/test/llm-parse-search-query.test.ts`. When it goes red, go and
+  look at whether the fixtures still say what they meant, *then* paste the new
+  value in. Not the other way round. **The leading number is the shape of
+  `SearchFilter` and is bumped by hand** — it went to `2-` when
+  `anyIngredients` was added, because the vocabularies had not moved and the
+  derived suffix therefore could not tell a fourteen-field filter from a
+  fifteen-field one.
 
 ### The parse step (FILTER_PLAN Phase 3, A29–A31)
 

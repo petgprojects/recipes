@@ -30,7 +30,9 @@ import {
   MAX_INGREDIENT_VOCABULARY,
   PARSE_SEARCH_QUERY_SYSTEM_PROMPT,
   TIME_TAG_MINUTES,
+  dropContradictoryIngredients,
   dropEmptyTerms,
+  foldSingletonAnyIngredients,
   foldSingletonAnyTags,
   parseSearchQuery,
   repairTimeTags,
@@ -63,7 +65,7 @@ describe('the committed fixtures', () => {
     // both go red a tag or category moved, and the question to answer first is
     // whether the stress expectations above still say what they meant.
     expect(FIXTURE_VOCAB_VERSION).toBe(SEARCH_VOCAB_VERSION);
-    expect(SEARCH_VOCAB_VERSION).toBe('1-723fe8e6');
+    expect(SEARCH_VOCAB_VERSION).toBe('2-723fe8e6');
   });
 
   it.each(SEARCH_QUERY_FIXTURES.map((f) => [f.query, f] as const))(
@@ -167,7 +169,7 @@ describe('parseSearchQuery', () => {
     expect(fake.calls[0]!.task.schema).toBe(searchFilterSchema);
   });
 
-  it('converts to a strict JSON Schema with all fourteen fields required', async () => {
+  it('converts to a strict JSON Schema with every field required', async () => {
     // The transport calls `z.toJSONSchema()` on this, and a schema carrying a
     // Zod *transform* throws there rather than at a type boundary — so the
     // contract's dedupe is an `.overwrite()`. Nothing else in the repo would
@@ -391,6 +393,141 @@ describe('foldSingletonAnyTags', () => {
     expect(filter.tags).toEqual([]);
     expect(filter.anyTags).toEqual([]);
     expect(repairedTimeTags).toEqual(['Under 20 min']);
+  });
+});
+
+// ── anyIngredients (A39) ────────────────────────────────────────────────────
+
+describe('anyIngredients', () => {
+  it('is a field the contract accepts, separately from ingredients', () => {
+    const filter = makeSearchFilter({
+      anyIngredients: ['turkey', 'ground turkey', 'turkey breast', 'shredded turkey'],
+    });
+    expect(filter.anyIngredients).toHaveLength(4);
+    expect(filter.ingredients).toEqual([]);
+  });
+
+  it('reaches the provider as part of the strict schema', () => {
+    // The whole point of the hand-bumped version prefix: a fourteen-field
+    // filter and a fifteen-field one must not claim the same vocabulary.
+    const schema = z.toJSONSchema(searchFilterSchema) as { required?: string[] };
+    expect(schema.required).toContain('anyIngredients');
+  });
+
+  it('is lowercased and deduped like the other two ingredient fields', () => {
+    expect(
+      makeSearchFilter({ anyIngredients: ['  Ground Turkey ', 'ground turkey'] }).anyIngredients,
+    ).toEqual(['ground turkey']);
+  });
+});
+
+describe('dropContradictoryIngredients', () => {
+  it('drops a name that is both asked for and refused, keeping the refusal', () => {
+    // The live failure this exists for: "no chicken" came back with the same
+    // ten names in `anyIngredients` and `excludeIngredients`, which compiles to
+    // "contains chicken and contains no chicken" — an empty page for the most
+    // ordinary exclusion there is.
+    const filter = dropContradictoryIngredients(
+      makeSearchFilter({
+        anyIngredients: ['chicken', 'chicken breast', 'ground chicken'],
+        excludeIngredients: ['chicken', 'chicken breast', 'ground chicken'],
+      }),
+    );
+    expect(filter.anyIngredients).toEqual([]);
+    expect(filter.excludeIngredients).toHaveLength(3);
+  });
+
+  it('keeps the part of an include that was not contradicted', () => {
+    const filter = dropContradictoryIngredients(
+      makeSearchFilter({
+        ingredients: ['shrimp', 'mushrooms'],
+        excludeIngredients: ['mushrooms'],
+      }),
+    );
+    expect(filter.ingredients).toEqual(['shrimp']);
+    expect(filter.excludeIngredients).toEqual(['mushrooms']);
+  });
+
+  it('leaves a coherent filter untouched, by identity', () => {
+    const filter = makeSearchFilter({
+      ingredients: ['shrimp'],
+      excludeIngredients: ['mushrooms'],
+    });
+    expect(dropContradictoryIngredients(filter)).toBe(filter);
+  });
+
+  it('runs before the fold, so a survivor of one is normalised by the other', async () => {
+    // Three names in, two contradicted, one left — and a lone name belongs in
+    // `ingredients`. Getting this order wrong leaves a singleton `anyIngredients`
+    // that every fixture would then report as drift.
+    const fake = fakeClient([
+      makeSearchFilter({
+        anyIngredients: ['chicken', 'chicken breast', 'shrimp'],
+        excludeIngredients: ['chicken', 'chicken breast'],
+      }),
+    ]);
+    const { filter } = await parseSearchQuery(fake.client, {
+      query: 'shrimp but no chicken',
+      profile: null,
+      ingredientVocabulary: VOCABULARY,
+    });
+    expect(filter.ingredients).toEqual(['shrimp']);
+    expect(filter.anyIngredients).toEqual([]);
+    expect(filter.excludeIngredients).toEqual(['chicken', 'chicken breast']);
+  });
+});
+
+describe('foldSingletonAnyIngredients', () => {
+  it('moves a lone name into ingredients — the same predicate, one spelling', () => {
+    // Unlike the tag pair, neither field is on `RELAXATION_LADDER`, so nothing
+    // downstream can tell these apart at all. That is why the fold is needed:
+    // without it every single-entry food fixture is a coin toss between two
+    // spellings and the drift report accuses a correct answer.
+    const folded = foldSingletonAnyIngredients(makeSearchFilter({ anyIngredients: ['capers'] }));
+    expect(folded.ingredients).toEqual(['capers']);
+    expect(folded.anyIngredients).toEqual([]);
+  });
+
+  it('merges without duplicating a name already required', () => {
+    const folded = foldSingletonAnyIngredients(
+      makeSearchFilter({ ingredients: ['shrimp'], anyIngredients: ['shrimp'] }),
+    );
+    expect(folded.ingredients).toEqual(['shrimp']);
+    expect(folded.anyIngredients).toEqual([]);
+  });
+
+  it('leaves a real food family alone — folding it is the bug A39 fixed', () => {
+    // Four turkey names as a *conjunction* is zero recipes, because no recipe
+    // holds all four. That is precisely the failure this field prevents.
+    const filter = makeSearchFilter({
+      anyIngredients: ['turkey', 'ground turkey', 'turkey breast'],
+    });
+    expect(foldSingletonAnyIngredients(filter)).toBe(filter);
+  });
+
+  it('is applied by parseSearchQuery', async () => {
+    const fake = fakeClient([makeSearchFilter({ anyIngredients: ['shrimp'] })]);
+    const { filter } = await parseSearchQuery(fake.client, {
+      query: 'something with shrimp',
+      profile: null,
+      ingredientVocabulary: VOCABULARY,
+    });
+    expect(filter.ingredients).toEqual(['shrimp']);
+    expect(filter.anyIngredients).toEqual([]);
+  });
+
+  it('leaves a family the model returned intact, end to end', async () => {
+    const family = ['turkey', 'ground turkey', 'turkey breast', 'shredded turkey'];
+    const fake = fakeClient([makeSearchFilter({ anyIngredients: family })]);
+    const { filter } = await parseSearchQuery(fake.client, {
+      query: 'anything with turkey in it',
+      profile: null,
+      ingredientVocabulary: VOCABULARY,
+    });
+    expect([...filter.anyIngredients].sort()).toEqual([...family].sort());
+    expect(filter.ingredients).toEqual([]);
+    // And it did not reach for the category that is mostly beef.
+    expect(filter.categories).toEqual([]);
   });
 });
 

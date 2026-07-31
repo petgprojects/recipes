@@ -41,6 +41,12 @@
  * `ingredients.name` exactly, and the corpus has 789 of them — far too many for
  * a JSON Schema enum, so the schema accepts free strings and the *vocabulary*
  * is supplied as an input instead. See {@link ParseSearchQueryInput}.
+ *
+ * **`ingredients` and `anyIngredients` are different questions too** (A39), and
+ * the corpus makes the difference expensive: one food is split across several
+ * canonical rows, so "turkey" is four names and a recipe has one of them.
+ * Conjoining them returns nothing and naming one returns a fifth of the answer.
+ * The prompt's INGREDIENTS section is mostly about telling those two apart.
  */
 
 import { z } from 'zod';
@@ -84,6 +90,28 @@ export const TIME_TAG_MINUTES = {
 const EASY_TAGS = ['Hands-off', 'One pot', 'One cleanup', 'Sheet pan', 'No cook'] as const;
 
 /**
+ * Why the prompt treats beef and turkey differently inside one category (A39).
+ *
+ * `Beef & Turkey` is the only category in `CATEGORIES` naming two foods, and
+ * measured on the live corpus on 2026-07-31 the two are nothing alike in it:
+ *
+ * - 29 active recipes are in the category; roughly **10** carry a beef
+ *   canonical ingredient, so the category has far better *recall* for beef than
+ *   the ingredient rows do, and nearly all of it is beef. "beef" → category.
+ * - **2** of those 29 contain turkey, while **5** recipes across the corpus do —
+ *   the other three are filed under Soup, Breakfast and Chicken. So the
+ *   category has both bad precision and bad recall for turkey.
+ *   "turkey" → `anyIngredients`.
+ *
+ * A rule the model could derive on its own would be better, but it cannot see
+ * these counts. Stating the fact is the same move A30 made with the tag
+ * vocabulary: the model does not know what this collection contains until it is
+ * told. If `CATEGORIES` ever changes, `SEARCH_VOCAB_VERSION` goes red and this
+ * paragraph is one of the things to re-check.
+ */
+
+
+/**
  * The controlled vocabularies, in the system prompt.
  *
  * They are already in the strict JSON Schema as enums, and that is not enough:
@@ -115,7 +143,7 @@ Duration is always a minute count, never a tag. Never put ${TIME_TAG_VOCABULARY}
 CATEGORIES
 categories and excludeCategories come from this controlled vocabulary and nothing else:
 ${CATEGORY_VOCABULARY}
-Use one only where the query names it or unmistakably means it — "chicken recipes" is Chicken, "beef stew" is Beef & Turkey, "vegetarian" is Vegetarian rather than the tag of the same name, because the category covers more of the collection. A general word for food — "dinners", "lunches", "meals", "recipes", "something" — names no category, and a related but different idea is not a category either: vegan is not Vegetarian. When in doubt leave categories empty; it is a coarse instrument and a wrong one is expensive.
+Use one only where the query names it or unmistakably means it — "chicken recipes" is Chicken, "beef stew" is Beef & Turkey, "vegetarian" is Vegetarian rather than the tag of the same name, because the category covers more of the collection. A general word for food — "dinners", "lunches", "meals", "recipes", "something" — names no category, and a related but different idea is not a category either: vegan is not Vegetarian. A category that names two foods answers a query about both of them, never about one: "turkey" on its own is not Beef & Turkey, and belongs in anyIngredients under INGREDIENTS below. When in doubt leave categories empty; it is a coarse instrument and a wrong one is expensive.
 
 TAGS
 tags, anyTags and excludeTags come from this controlled vocabulary and nothing else:
@@ -127,11 +155,16 @@ anyTags is a disjunction, for one fuzzy property that several tags each partiall
 Never put one tag in more than one of tags, anyTags and excludeTags.
 
 INGREDIENTS
-ingredients and excludeIngredients must be names copied character for character from ingredient_vocabulary. They are matched exactly, so a name you invent or reshape matches nothing; if the vocabulary has no entry for what the query names, leave the field empty rather than approximating. Never put the same name in both.
-ingredients is for a specific food the query asks to have in the recipe, and it is a conjunction — every name listed must be on the same recipe. A query for a whole food family that is a category sets the category and leaves ingredients empty: "chicken recipes" is Chicken and nothing else, because naming the cuts as well would demand a recipe containing all of them at once.
-Excluding is the other way round, and reaches wider. One food usually appears in the vocabulary several times, as cuts and forms, so name every entry that is that same food: "chicken" is also "chicken breast", "chicken thighs" and "ground chicken", and "beef" is also "ground beef".
-Stop at the food itself. A broth, a stock, a sauce or a fat made from it is a different grocery item that mostly tastes of itself, so "chicken broth", "chicken stock" and "beef broth" stay out of an exclusion of chicken or beef. A wrong exclusion hides recipes the cook wanted and gives them no way to find out, and that is the more expensive mistake here.
-Where the excluded food is also a category, name that category in excludeCategories as well: "no chicken" is excludeCategories ["Chicken"] alongside the chicken names, and "no beef" is excludeCategories ["Beef & Turkey"].
+ingredients, anyIngredients and excludeIngredients must be names copied character for character from ingredient_vocabulary. They are matched exactly, so a name you invent or reshape matches nothing; if the vocabulary has no entry for what the query names, leave the field empty rather than approximating. Never put the same name in more than one of the three.
+One food usually appears in ingredient_vocabulary several times, as cuts and forms. Which field it belongs in follows from that, and from whether the query named a whole food or one specific item.
+anyIngredients is a disjunction — a recipe need only contain one of the names — and it is where a whole food goes: read ingredient_vocabulary and list every entry that is that same food. Asked for turkey, that is "turkey" and "ground turkey" and "turkey breast" and "shredded turkey", if the vocabulary holds all four. Naming only one of them answers a fraction of the question, and this is the usual case for a query that names a food at all.
+ingredients is a conjunction — every name listed must be on the same recipe — so it is only for a specific item, or for a combination the query asked for together: "a recipe with harissa" is ingredients ["harissa"], and "salmon and asparagus" is ingredients ["salmon", "asparagus"] because both have to be there. Never put two forms of one food here; demanding "turkey" and "ground turkey" on one recipe returns nothing at all.
+A query that says to leave a food out sets excludeIngredients and *only* excludeIngredients: naming it in ingredients or anyIngredients as well asks for the food and refuses it in the same breath, which is no recipes at all. Excluding does list every entry of the food, the way anyIngredients would have: "no chicken" is excludeIngredients ["chicken", "chicken breast", "chicken thighs", "ground chicken"] with both include fields empty. List the entries ingredient_vocabulary actually holds and no others — a plain "beef" is not in it in every collection, and a name that is not there matches nothing.
+Stop at the food itself, in all three fields. A broth, a stock, a sauce or a fat made from it is a different grocery item that mostly tastes of itself, so "chicken broth", "chicken stock" and "beef broth" are not chicken or beef either to ask for or to exclude. A wrong exclusion hides recipes the cook wanted and gives them no way to find out, and that is the more expensive mistake here.
+A food may also match a category, and the direction of the query decides which field that goes in. Asking for a food can set categories. Refusing one sets excludeCategories and must never set categories: putting a refused food in categories asks for a page of exactly what the cook said to avoid.
+Asking: a food that is a whole category of its own is answered by that category with both include fields left empty, because the category covers more of the collection than the cuts do — "chicken recipes" is categories ["Chicken"] and nothing else.
+Refusing: "no chicken" is excludeCategories ["Chicken"] together with excludeIngredients ["chicken", "chicken breast", "chicken thighs", "ground chicken"], and categories stays empty.
+"Beef & Turkey" is the one category naming two foods, and they are not alike in it: nearly all of it is beef and almost none is turkey, while most turkey in the collection is filed under other categories entirely. So beef uses it in both directions — "beef" is categories ["Beef & Turkey"], "no beef" is excludeCategories ["Beef & Turkey"] with the beef names — and turkey uses it in neither. "turkey" is anyIngredients with the turkey names and no category, because that category would be a page of the wrong meat; "no turkey" is excludeIngredients with the turkey names and no category, because excluding it would throw away the beef the cook never objected to.
 
 THE REST
 minServings is only for feeding a number of people: "feeds a crowd" is 8, on its own — how many a recipe serves and how much of it there is are different questions, so do not add the "Big batch" tag as well.
@@ -224,7 +257,14 @@ export async function parseSearchQuery(
     options,
   );
 
-  return repairTimeTags(foldSingletonAnyTags(dropEmptyTerms(output)));
+  // Order matters once: `dropContradictoryIngredients` can empty
+  // `anyIngredients` down to a single name, and that singleton then wants
+  // folding. Contradictions first, fold second.
+  return repairTimeTags(
+    foldSingletonAnyIngredients(
+      dropContradictoryIngredients(foldSingletonAnyTags(dropEmptyTerms(output))),
+    ),
+  );
 }
 
 /**
@@ -286,6 +326,10 @@ export function dropEmptyTerms(filter: SearchFilter): SearchFilter {
  * Only for a singleton. Two or more in `anyTags` is a genuine disjunction and
  * §3.1's whole point; moving those would turn "easy to make" into a demand for
  * five tags at once, which is the failure the field exists to prevent.
+ *
+ * {@link foldSingletonAnyIngredients} is the same fold for A39's second pair,
+ * and it is worth being clear that it guarantees something *different*. This
+ * one protects the relaxation ladder; that one protects the fixtures.
  */
 export function foldSingletonAnyTags(filter: SearchFilter): SearchFilter {
   if (filter.anyTags.length !== 1) return filter;
@@ -293,6 +337,65 @@ export function foldSingletonAnyTags(filter: SearchFilter): SearchFilter {
     ...filter,
     tags: [...new Set([...filter.tags, ...filter.anyTags])],
     anyTags: [],
+  };
+}
+
+/**
+ * A name cannot be both asked for and refused (A39).
+ *
+ * The contract has always said so and the prompt has always asked for it; this
+ * makes it true. The failure it prevents is not hypothetical — the first live
+ * run after `anyIngredients` was added answered "no chicken" with the same ten
+ * canonical names in `anyIngredients` *and* `excludeIngredients`, which
+ * compiles to "contains some chicken AND contains no chicken" and returns
+ * nothing at all. A reader would see an empty page for the most ordinary
+ * exclusion there is.
+ *
+ * **The exclusion wins**, and the include side is what gets dropped. Both
+ * readings cannot be honoured, and they are not equally bad: showing someone
+ * the food they just said to leave out is the one failure §3.2 calls
+ * unrecoverable — "a wrong exclusion hides recipes they wanted and gives them
+ * no way to find out", and its opposite here is worse still, because they asked
+ * for the exclusion in so many words. Same direction as A18 and A20.
+ */
+export function dropContradictoryIngredients(filter: SearchFilter): SearchFilter {
+  if (filter.excludeIngredients.length === 0) return filter;
+  const excluded = new Set(filter.excludeIngredients);
+
+  const ingredients = filter.ingredients.filter((name) => !excluded.has(name));
+  const anyIngredients = filter.anyIngredients.filter((name) => !excluded.has(name));
+  if (
+    ingredients.length === filter.ingredients.length &&
+    anyIngredients.length === filter.anyIngredients.length
+  ) {
+    return filter;
+  }
+  return { ...filter, ingredients, anyIngredients };
+}
+
+/**
+ * A lone name in `anyIngredients` belongs in `ingredients` (A39).
+ *
+ * Over one element the two compile to the *same predicate* — "this recipe
+ * contains x" — and unlike the tag pair, neither field is on
+ * `RELAXATION_LADDER`, so nothing downstream can tell them apart either. That
+ * is exactly why this fold is needed rather than why it is unnecessary: a
+ * difference that changes no result but does change the JSON makes every
+ * committed fixture for a single-entry food a coin toss between two spellings,
+ * and `scripts/check-search-parse.ts` would report drift on a filter that means
+ * precisely what it was supposed to mean. Fold it, and the fixtures measure
+ * parsing instead of measuring sampling.
+ *
+ * Only for a singleton, same as above. Two or more is the genuine disjunction
+ * this field was added for, and folding it would recreate the bug: "turkey" as
+ * a conjunction of four names is zero recipes.
+ */
+export function foldSingletonAnyIngredients(filter: SearchFilter): SearchFilter {
+  if (filter.anyIngredients.length !== 1) return filter;
+  return {
+    ...filter,
+    ingredients: [...new Set([...filter.ingredients, ...filter.anyIngredients])],
+    anyIngredients: [],
   };
 }
 

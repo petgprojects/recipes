@@ -348,3 +348,151 @@
  * ---------------------------------------------------------------- */
 .mp-grid-single { grid-template-columns: 1fr; }
 .mp-card-acts-spaced { margin-top: 24px; }
+
+/* ---------------------------------------------------------------- *
+ *  Phase 5. The list is merged in SQL now; what is new here is the
+ *  toolbar above the receipt and the printed page.
+ * ---------------------------------------------------------------- */
+.mp-bar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Printing a shopping list is the one thing this page is *for* away from a
+   screen, so the printed page is the receipt and nothing else: no masthead, no
+   tabs, no browse grid, and no controls the paper cannot honour. The receipt
+   itself already looks like paper — it just has to stop being a card floating
+   on a coloured background. */
+@media print {
+  html { background: #fff; }
+  .mp-head,
+  .mp-tabs,
+  .mp-chips,
+  .mp-pill,
+  .mp-grid,
+  .mp-note,
+  .mp-rules,
+  .mp-scrim,
+  .mp-no-print { display: none !important; }
+
+  .mp-wrap { max-width: none; padding: 0; }
+  .mp-receipt { box-shadow: none; padding: 0; }
+  .mp-tear { display: none; }
+
+  /* An unticked box has transparent glyph colour on screen, which prints as an
+     empty square — correct. A ticked one prints as a filled leaf-green box,
+     which most printers render as a muddy grey; keep the tick and drop the
+     fill so the paper stays legible. */
+  .mp-r-item[data-on="true"] .mp-box {
+    background: none; border-color: var(--beet-soft); color: var(--beet);
+  }
+  .mp-r-item { break-inside: avoid; }
+  .mp-aisle { break-after: avoid; }
+}
+
+/* ---------------------------------------------------------------- *
+ *  Phase 6. The after-cooking flow, inside the detail sheet: a star
+ *  rating, aspect tags and a note, plus the reader's own history for
+ *  that recipe.
+ * ---------------------------------------------------------------- */
+.mp-stars { display: flex; gap: 4px; margin-bottom: 12px; }
+.mp-star { font-size: 26px; line-height: 1; color: var(--line); transition: color .12s; }
+.mp-star[data-on="true"] { color: var(--amber); }
+.mp-star:hover { color: var(--amber); }
+
+.mp-chips-wrap { flex-wrap: wrap; overflow-x: visible; padding: 0 0 12px; }
+
+.mp-textarea {
+  display: block; width: 100%; min-height: 72px; resize: vertical;
+  font-family: var(--body); font-size: 14px; color: var(--slate);
+  background: var(--paper); border: 1.5px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 12px;
+}
+.mp-textarea::placeholder { color: #A8949C; }
+
+.mp-cooklogs { list-style: none; padding: 0; margin: 18px 0 0; }
+.mp-cooklog {
+  position: relative; padding: 12px 0; border-bottom: 1px dotted var(--line);
+}
+.mp-cooklog-top { display: flex; align-items: baseline; gap: 8px; }
+.mp-cooklog-stars { color: var(--amber); font-size: 14px; letter-spacing: 1px; }
+.mp-cooklog-date {
+  font-family: var(--mono); font-size: 10.5px; color: var(--beet-soft);
+}
+.mp-cooklog-aspects {
+  font-family: var(--mono); font-size: 11px; color: var(--leaf);
+  margin-top: 4px;
+}
+.mp-cooklog-notes { font-size: 13.5px; line-height: 1.5; margin: 6px 40px 0 0; }
+.mp-cooklog-remove {
+  position: absolute; top: 12px; right: 0;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--beet-soft);
+  border-bottom: 1.5px solid var(--line);
+}
+.mp-cooklog-remove:hover { color: var(--beet); border-color: var(--beet); }
+
+/* ---------------------------------------------------------------- *
+ *  Phase 7. The rules derived from your own ratings, made visible.
+ *  PLAN.md §5: "a filter you can't see is indistinguishable from a
+ *  bug", so this panel is not collapsible and not behind a settings
+ *  page — it sits above the feed it is filtering.
+ * ---------------------------------------------------------------- */
+.mp-rules {
+  background: var(--paper); border: 1.5px solid var(--line);
+  border-radius: 14px; padding: 14px 16px; margin-bottom: 14px;
+}
+.mp-rules-top {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+}
+.mp-rules-title {
+  font-family: var(--display); font-size: 15px; font-weight: 600;
+  color: var(--beet); margin: 0;
+}
+.mp-rules-count {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--beet-soft);
+}
+
+.mp-rules-list { list-style: none; padding: 0; margin: 10px 0 0; }
+.mp-rule {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 9px 0; border-top: 1px dotted var(--line);
+}
+.mp-rule:first-child { border-top: none; }
+
+.mp-rule-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mp-rule-what { font-size: 13.5px; line-height: 1.4; color: var(--slate); }
+.mp-rule-why {
+  font-family: var(--mono); font-size: 10.5px; color: var(--beet-soft);
+}
+/* A switched-off rule stays listed — it is still a fact about your history,
+   and one that vanished would leave no way to switch it back on. It just
+   stops looking like something that is doing anything. */
+.mp-rule[data-on="false"] .mp-rule-what { color: #A8949C; text-decoration: line-through; }
+.mp-rule[data-on="false"] .mp-rule-why { opacity: .6; }
+
+.mp-switch {
+  flex: 0 0 auto; width: 40px; height: 23px; border-radius: 999px;
+  border: 1.5px solid var(--line); background: var(--blush);
+  padding: 0; position: relative; transition: background .14s, border-color .14s;
+}
+.mp-switch[aria-checked="true"] { background: var(--leaf); border-color: var(--leaf); }
+.mp-switch:disabled { opacity: .55; }
+.mp-switch-knob {
+  position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  border-radius: 50%; background: var(--paper); transition: transform .14s;
+}
+.mp-switch[aria-checked="true"] .mp-switch-knob { transform: translateX(17px); }
+
+/* ---------------------------------------------------------------- *
+ *  Phase 7 step 3. Why this recipe is where it is in the feed.
+ *  Same argument as the rules panel above: a ranking you cannot see
+ *  the reasoning behind is one you cannot argue with. It reads as an
+ *  aside rather than as another blurb, because it is the app talking
+ *  about itself, not about the food.
+ * ---------------------------------------------------------------- */
+.mp-card-why {
+  display: flex; align-items: baseline; gap: 6px;
+  margin: 8px 0 0; padding: 7px 9px;
+  background: var(--leaf-soft); border-radius: 8px;
+  font-size: 12.5px; line-height: 1.45; color: var(--leaf);
+}
+.mp-card-why-mark { flex: 0 0 auto; font-size: 11px; }

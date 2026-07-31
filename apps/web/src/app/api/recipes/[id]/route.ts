@@ -13,6 +13,7 @@
 
 import { NextResponse } from 'next/server';
 import { RECIPE_STATUS } from '@recipes/shared';
+import { getCurrentUser } from '@/lib/current-user';
 import { getRecipeDetail, isRecipeStatus } from '@/lib/recipes';
 import type { RecipeStatus } from '@recipes/shared';
 
@@ -44,7 +45,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   }
 
   try {
-    const recipe = await getRecipeDetail(id, { status });
+    // From the session, never the query string — the same rule the browse feed
+    // follows for hard rules. A score is about the reader, so it must not be
+    // something a caller can ask for on someone else's behalf.
+    const userId = (await getCurrentUser())?.id ?? null;
+    const recipe = await getRecipeDetail(id, { status, userId });
     if (recipe === null) {
       return NextResponse.json(
         { error: 'Recipe not found' },

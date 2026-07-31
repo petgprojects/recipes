@@ -96,7 +96,15 @@ const envSchema = z.object({
    * Must be set whenever the server is bound to `0.0.0.0` (every container),
    * because Auth.js would otherwise infer `http://0.0.0.0:3000` from
    * `request.url` and send that as the OAuth `redirect_uri` — which Google
-   * rejects as a policy violation. docker-compose.yml sets it for you.
+   * rejects as a policy violation. docker-compose.yml derives it from
+   * `NEXT_PUBLIC_APP_URL` for you.
+   *
+   * Deployed behind a proxy or a Cloudflare Tunnel this is the *public* origin,
+   * not the container's — the last hop is plain HTTP but the browser and Google
+   * both see `https://…`, and pinning it here is what keeps the `redirect_uri`
+   * in the token exchange identical to the one registered with Google. An
+   * `https` value also switches Auth.js to `__Secure-`-prefixed cookies, so the
+   * public origin must genuinely be HTTPS (amendment A22).
    */
   AUTH_URL: z.url().default('http://localhost:3000'),
 

@@ -12,6 +12,7 @@ import {
   aggregateGroceries,
   countGroceryItems,
   groceryItemKey,
+  groceryListToText,
   type GroceryRecipeInput,
 } from '../src/grocery';
 
@@ -219,5 +220,48 @@ describe('aggregateGroceries', () => {
   it('returns nothing for no saved recipes', () => {
     expect(aggregateGroceries([])).toEqual([]);
     expect(countGroceryItems([])).toBe(0);
+  });
+});
+
+describe('groceryListToText', () => {
+  const groups = aggregateGroceries([
+    recipe('a', 'Chili', [
+      line({ qty: 2, unit: 'lb' }),
+      line({
+        ingredientId: OLIVE_OIL,
+        name: 'olive oil',
+        rawText: 'olive oil, to taste',
+        aisle: 'Pantry',
+        qty: null,
+        unit: null,
+        optional: true,
+      }),
+    ]),
+  ]);
+
+  it('carries the aisle order, the amounts and the check marks', () => {
+    const text = groceryListToText(groups, {
+      checked: { [`${CHICKEN}:mass`]: true },
+      recipeCount: 1,
+      totalServings: 4,
+    });
+
+    expect(text).toBe(
+      [
+        'SHOPPING LIST',
+        '1 recipe · 4 servings · 2 items',
+        '',
+        'MEAT & SEAFOOD',
+        '[x] chicken breast — 2 lb',
+        '',
+        'PANTRY',
+        '[ ] olive oil (optional)',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('needs no options and still says how many items there are', () => {
+    expect(groceryListToText([])).toBe('SHOPPING LIST\n0 items\n');
   });
 });

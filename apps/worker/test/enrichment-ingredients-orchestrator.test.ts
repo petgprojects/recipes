@@ -40,7 +40,7 @@ describe('semantic ingredient backfill orchestrator', () => {
             input_name: 'olive oil',
             action: 'existing',
             canonical_name: 'olive oil',
-            aisle: null,
+            aisle: 'Pantry',
           },
         ],
       })
@@ -50,7 +50,7 @@ describe('semantic ingredient backfill orchestrator', () => {
             input_name: 'salt',
             action: 'existing',
             canonical_name: 'salt',
-            aisle: null,
+            aisle: 'Spices',
           },
         ],
       });
@@ -158,7 +158,7 @@ describe('semantic ingredient backfill orchestrator', () => {
           input_name: 'olive oil',
           action: 'existing',
           canonical_name: 'olive oil',
-          aisle: null,
+          aisle: 'Pantry',
         },
       ],
     });

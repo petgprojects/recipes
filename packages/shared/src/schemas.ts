@@ -311,12 +311,21 @@ export const canonicalIngredientSummarySchema = z
   })
   .strict();
 
+/**
+ * `aisle` is required here even though the database already knows the aisle of
+ * an existing canonical ingredient, and `toPersistenceDecisions()` still uses
+ * that authoritative value. It is asked for so that the plausibility guard has
+ * somewhere to land: when `isPlausibleCanonicalMatch()` rejects the model's
+ * `"existing"` claim, the decision is rewritten as `"new"`, and a `new`
+ * canonical needs an aisle. Without this the guard would need a second
+ * round-trip to find out where the item lives in the store.
+ */
 const ingredientMappingExistingDecisionSchema = z
   .object({
     input_name: normalizedIngredientNameSchema,
     action: z.literal('existing'),
     canonical_name: normalizedIngredientNameSchema,
-    aisle: z.null(),
+    aisle: z.enum(AISLES),
   })
   .strict();
 

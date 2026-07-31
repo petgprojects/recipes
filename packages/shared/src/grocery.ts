@@ -15,10 +15,16 @@
  * lines — `unitDimensionKey()` keys count units on the unit itself, so no
  * conversion is ever invented.
  *
- * Phase 5 replaces this with the equivalent SQL over
- * `saved_recipes × recipe_ingredients × ingredients`. The key derivation and
- * the formatting are the parts that must survive that move unchanged, which is
- * why they live here rather than in a React `useMemo`.
+ * Phase 5 moved the *merge* into SQL over
+ * `saved_recipes × recipe_ingredients × ingredients`, but not this file's tail.
+ * Grouping lines into buckets is a join and a `group by`, which the database
+ * does better; deciding whether a total reads `1⅛ cup` or `18 tbsp` is
+ * presentation, and it needs `units.ts` and `format.ts`, which have no SQL
+ * equivalent and should not grow one. So the two paths converge on
+ * {@link finalizeGroceryBuckets}: SQL builds buckets, {@link aggregateGroceries}
+ * builds the same buckets in memory, and everything after that is this file.
+ * `apps/web/test/grocery-sql.integration.test.ts` runs both over the same rows
+ * and asserts they agree.
  */
 
 import { fmtLine } from './format';
@@ -112,7 +118,18 @@ export function groceryItemKey(
  * ingredient's real line if there is one — otherwise it stands alone, because
  * a renderable row with an unknown amount still belongs on the list.
  */
-const UNSPECIFIED = 'unspecified';
+export const UNSPECIFIED = 'unspecified';
+
+/** The bucket key a line lands in: real dimension, or the unspecified bucket. */
+export function groceryBucketKey(
+  ingredientId: string | null,
+  rawText: string,
+  unit: string | null,
+  quantified: boolean,
+): string {
+  const identity = groceryIdentityKey(ingredientId, rawText);
+  return quantified ? `${identity}:${unitDimensionKey(unit)}` : `${identity}:${UNSPECIFIED}`;
+}
 
 // ── Aggregation ─────────────────────────────────────────────────────────────
 
@@ -130,6 +147,64 @@ interface Bucket {
   recipes: Set<string>;
 }
 
+/**
+ * A bucket as the SQL query hands it over: already merged, already multiplied
+ * by its recipe's batch count, not yet turned into something printable.
+ *
+ * This is the seam between the two implementations. Everything above it — which
+ * lines share a key, whose name and aisle win, what order the contributions
+ * came in — is what `lib/grocery.ts` reproduces in SQL. Everything below it is
+ * unit choice and formatting, which stays here.
+ */
+export interface GroceryBucketInput {
+  readonly key: string;
+  /** The key without its dimension suffix; what the unspecified fold joins on. */
+  readonly identity: string;
+  readonly name: string;
+  readonly aisle: string | null;
+  /** At least one contributing line carried no quantity. */
+  readonly approximate: boolean;
+  /** Every contributing line was optional. */
+  readonly optional: boolean;
+  /** Position of the bucket's earliest line; decides which line a fold joins. */
+  readonly order: number;
+  /** Recipe titles in contribution order. Duplicates are collapsed here. */
+  readonly recipes: readonly string[];
+  /** Quantities in contribution order, already multiplied by `batches`. */
+  readonly quantified: readonly { readonly qty: number; readonly unit: string | null }[];
+}
+
+/** Buckets → the printable receipt. The shared tail of both implementations. */
+export function finalizeGroceryBuckets(
+  inputs: readonly GroceryBucketInput[],
+): GroceryAisleGroup[] {
+  const buckets = new Map<string, Bucket>();
+  // Insert in `order`. Two items can sort equal by name — the same ingredient
+  // bought by the clove and by the each — and the sort that groups them is
+  // stable, so map insertion order is what breaks the tie. A `group by` hands
+  // rows back in whatever order it likes, so without this the SQL list and the
+  // in-memory list would differ by a swap of two adjacent lines.
+  for (const input of [...inputs].sort((a, b) => a.order - b.order)) {
+    buckets.set(input.key, {
+      key: input.key,
+      identity: input.identity,
+      name: input.name,
+      named: true,
+      aisle: isAisle(input.aisle) ? input.aisle : FALLBACK_AISLE,
+      quantified: input.quantified.map((line) => ({
+        qty: line.qty,
+        unit: normalizeUnit(line.unit),
+        rawUnit: line.unit,
+      })),
+      approximate: input.approximate,
+      optional: input.optional,
+      order: input.order,
+      recipes: new Set(input.recipes),
+    });
+  }
+  return collectGroups(buckets);
+}
+
 export function aggregateGroceries(
   recipes: readonly GroceryRecipeInput[],
 ): GroceryAisleGroup[] {
@@ -142,9 +217,7 @@ export function aggregateGroceries(
     for (const line of recipe.ingredients) {
       const quantified = line.qty !== null && Number.isFinite(line.qty);
       const identity = groceryIdentityKey(line.ingredientId, line.rawText);
-      const key = quantified
-        ? `${identity}:${unitDimensionKey(line.unit)}`
-        : `${identity}:${UNSPECIFIED}`;
+      const key = groceryBucketKey(line.ingredientId, line.rawText, line.unit, quantified);
       const display = line.name.trim() === '' ? line.rawText.trim() : line.name.trim();
 
       let bucket = buckets.get(key);
@@ -183,6 +256,10 @@ export function aggregateGroceries(
     }
   }
 
+  return collectGroups(buckets);
+}
+
+function collectGroups(buckets: Map<string, Bucket>): GroceryAisleGroup[] {
   foldUnspecifiedBuckets(buckets);
 
   const grouped = new Map<Aisle, GroceryItem[]>();
@@ -349,4 +426,59 @@ function totalIn(
 /** Convenience for the receipt header: how many distinct lines to shop for. */
 export function countGroceryItems(groups: readonly GroceryAisleGroup[]): number {
   return groups.reduce((sum, group) => sum + group.items.length, 0);
+}
+
+export interface GroceryTextOptions {
+  /** Ticked items, so a half-shopped list copies as a half-shopped list. */
+  readonly checked?: Readonly<Record<string, true>>;
+  readonly recipeCount?: number;
+  readonly totalServings?: number;
+}
+
+/**
+ * The list as plain text, for the clipboard (PLAN.md §5, Phase 5).
+ *
+ * Pasted into Notes, a message to whoever is actually going to the shop, or a
+ * terminal, this has to survive having no styling at all — so the aisle order
+ * that the receipt communicates with headings is communicated here the same
+ * way, and the `—` that separates an item from its amount is a character, not
+ * a row of dots that would wrap badly.
+ *
+ * `+` keeps its meaning from the receipt: one contributing line said "to
+ * taste", so the total is a floor. An item with no amount at all gets no
+ * amount here either rather than a misleading `0`.
+ */
+export function groceryListToText(
+  groups: readonly GroceryAisleGroup[],
+  options: GroceryTextOptions = {},
+): string {
+  const checked = options.checked ?? {};
+  const lines: string[] = ['SHOPPING LIST'];
+
+  const summary: string[] = [];
+  if (options.recipeCount !== undefined && options.recipeCount > 0) {
+    summary.push(`${options.recipeCount} ${options.recipeCount === 1 ? 'recipe' : 'recipes'}`);
+  }
+  if (options.totalServings !== undefined && options.totalServings > 0) {
+    summary.push(`${options.totalServings} servings`);
+  }
+  const itemCount = countGroceryItems(groups);
+  summary.push(`${itemCount} ${itemCount === 1 ? 'item' : 'items'}`);
+  lines.push(summary.join(' · '));
+
+  for (const group of groups) {
+    lines.push('', group.aisle.toUpperCase());
+    for (const item of group.items) {
+      const mark = checked[item.key] === true ? '[x]' : '[ ]';
+      const amount = item.amount === '' ? '' : `${item.amount}${item.approximate ? '+' : ''}`;
+      const suffix = item.optional ? ' (optional)' : '';
+      lines.push(
+        amount === ''
+          ? `${mark} ${item.name}${suffix}`
+          : `${mark} ${item.name}${suffix} — ${amount}`,
+      );
+    }
+  }
+
+  return `${lines.join('\n')}\n`;
 }

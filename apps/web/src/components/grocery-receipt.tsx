@@ -1,17 +1,22 @@
 'use client';
 
 /**
- * The receipt. The aggregation itself lives in `@recipes/shared/grocery` — it
- * is tested there, and Phase 5 replaces its internals with SQL while this
- * component keeps rendering the same `GroceryAisleGroup[]`.
+ * The receipt.
  *
- * What this file owns is the paper aesthetic (which is the best part of the
- * original design, per PLAN.md §5) and two honesty affordances the artifact's
- * hand-authored data never needed: an amount can be unknown, and a total can
- * be an underestimate when a source wrote "salt, to taste".
+ * The merge happens in SQL (Phase 5, `lib/grocery.ts`) and the printable text
+ * lives in `@recipes/shared/grocery`; what this file owns is the paper
+ * aesthetic — which PLAN.md §5 asks to keep, and which is the best part of the
+ * original design — plus two honesty affordances the artifact's hand-authored
+ * data never needed: an amount can be unknown, and a total can be an
+ * underestimate when a source wrote "salt, to taste".
+ *
+ * Print and copy are Phase 5 deliverables. Both go through the same list this
+ * component is rendering, so what comes out of the printer or the clipboard is
+ * what is on screen, including which boxes are ticked.
  */
 
-import type { GroceryAisleGroup } from '@recipes/shared/grocery';
+import { useCallback, useEffect, useState } from 'react';
+import { groceryListToText, type GroceryAisleGroup } from '@recipes/shared/grocery';
 
 interface GroceryReceiptProps {
   groups: readonly GroceryAisleGroup[];
@@ -20,9 +25,13 @@ interface GroceryReceiptProps {
   totalServings: number;
   itemCount: number;
   loading: boolean;
+  /** A failed list is not an empty list; the reader has to be told which. */
+  error: Error | null;
   onToggle: (itemKey: string) => void;
   onClearChecks: () => void;
 }
+
+type CopyState = 'idle' | 'copied' | 'failed';
 
 export function GroceryReceipt({
   groups,
@@ -31,9 +40,31 @@ export function GroceryReceipt({
   totalServings,
   itemCount,
   loading,
+  error,
   onToggle,
   onClearChecks,
 }: GroceryReceiptProps) {
+  const [copied, setCopied] = useState<CopyState>('idle');
+
+  useEffect(() => {
+    if (copied === 'idle') return;
+    const timer = setTimeout(() => setCopied('idle'), 2_500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  const copy = useCallback(async () => {
+    const text = groceryListToText(groups, { checked, recipeCount, totalServings });
+    try {
+      // `navigator.clipboard` is undefined over plain HTTP on anything but
+      // localhost, and `writeText` rejects when the document is not focused.
+      // Neither deserves an exception in the console — the button says so.
+      await navigator.clipboard.writeText(text);
+      setCopied('copied');
+    } catch {
+      setCopied('failed');
+    }
+  }, [groups, checked, recipeCount, totalServings]);
+
   if (recipeCount === 0) {
     return (
       <div className="mp-empty">
@@ -46,6 +77,18 @@ export function GroceryReceipt({
     );
   }
 
+  if (error !== null) {
+    return (
+      <div className="mp-empty">
+        <h3>Couldn&apos;t build the list</h3>
+        <p>
+          {error.message}. Your picks are safe — this is the shopping list that could not be read.
+          It will retry on its own.
+        </p>
+      </div>
+    );
+  }
+
   const doneCount = groups.reduce(
     (sum, group) => sum + group.items.filter((item) => checked[item.key] === true).length,
     0,
@@ -53,13 +96,21 @@ export function GroceryReceipt({
 
   return (
     <>
-      <div className="mp-bar">
+      <div className="mp-bar mp-no-print">
         <div className="mp-mini">
           {loading ? 'Building the list…' : `${doneCount} of ${itemCount} in the cart`}
         </div>
-        <button className="mp-mini" onClick={onClearChecks}>
-          Uncheck all
-        </button>
+        <div className="mp-bar-actions">
+          <button className="mp-mini" onClick={() => void copy()}>
+            {copied === 'copied' ? 'Copied' : copied === 'failed' ? "Couldn't copy" : 'Copy as text'}
+          </button>
+          <button className="mp-mini" onClick={() => window.print()}>
+            Print
+          </button>
+          <button className="mp-mini" onClick={onClearChecks}>
+            Uncheck all
+          </button>
+        </div>
       </div>
 
       <div className="mp-receipt">
@@ -115,7 +166,7 @@ export function GroceryReceipt({
       </div>
       <div className="mp-tear" />
 
-      <p className="mp-note">
+      <p className="mp-note mp-no-print">
         Aisles run in the order most stores are laid out, with frozen last so nothing melts on the
         walk to the register. The same ingredient from several recipes is added together whenever
         the units allow it — cans and ounces stay separate lines rather than being guessed at. A

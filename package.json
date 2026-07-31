@@ -12,7 +12,7 @@
     "db:migrate": "corepack pnpm --filter @recipes/db run db:migrate",
     "db:seed": "corepack pnpm --filter @recipes/db run db:seed",
     "db:studio": "corepack pnpm --filter @recipes/db run db:studio",
-    "test": "corepack pnpm -r --if-present run test",
+    "test": "corepack pnpm -r --workspace-concurrency=1 --if-present run test",
     "typecheck": "corepack pnpm -r --if-present run typecheck",
     "dev": "corepack pnpm -r --parallel --if-present run dev"
   },

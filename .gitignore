@@ -9,6 +9,9 @@ out/
 .env
 .env.local
 .env.*.local
+# The DEV_AUTH_FALLBACK round-trip in HANDOFF.md parks a copy of .env here
+# while the web container is recreated. It holds the same live secrets.
+.env.backup
 
 .DS_Store
 *.log
@@ -27,3 +30,11 @@ coverage/
 # Google OAuth client downloads. The values belong in .env; the file itself is
 # a credential and must never be committed.
 client_secret_*.json
+
+# Corpus transfer artefacts (AGENTS.md, "Moving the corpus to another machine").
+# `recipes.dump` is a credential: `accounts` carries access/id tokens per linked
+# Google account and `sessions` carries live session tokens. Both are large and
+# neither belongs in git — they are made in the repo root by the documented
+# commands, so they are ignored by name rather than left to vigilance.
+*.dump
+recipe-images.tgz

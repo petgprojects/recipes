@@ -14,10 +14,12 @@
 
 import type { Metadata } from 'next';
 import type { PlannerState } from '@recipes/shared/planner';
+import type { HardRule } from '@recipes/shared/personalization';
 import { Planner } from '@/components/planner';
 import { isAuthConfigured } from '@/lib/auth';
 import { getCurrentUser } from '@/lib/current-user';
 import { readPlannerState } from '@/lib/planner';
+import { getUserPreferences } from '@/lib/preferences';
 import { BROWSE_LIMIT, listRecipes } from '@/lib/recipes';
 import type { RecipeSummary } from '@/lib/recipe-types';
 import type { PlannerUser } from '@/lib/saved-store';
@@ -37,13 +39,20 @@ export default async function Home() {
   let failure: string | null = null;
   let user: PlannerUser | null = null;
   let plannerState: PlannerState | undefined;
+  let hardRules: HardRule[] = [];
 
   try {
     // Sequential rather than parallel on purpose: the picks read needs the user
     // id, and a failed session lookup should not leave a dangling query.
     user = await getCurrentUser();
+    // Before the browse query, not alongside it: the rules are an argument to
+    // it. `/api/recipes` resolves them the same way, which is what keeps this
+    // render usable as the client's `initialData`.
+    const preferences = await getUserPreferences(user?.id ?? null);
+    hardRules = preferences.rules;
+
     const [rows, saved] = await Promise.all([
-      listRecipes({ limit: BROWSE_LIMIT }),
+      listRecipes({ limit: BROWSE_LIMIT, hardRules, userId: user?.id ?? null }),
       user === null ? Promise.resolve(undefined) : readPlannerState(user.id),
     ]);
     recipes = rows;
@@ -81,6 +90,7 @@ export default async function Home() {
       initialRecipes={recipes}
       user={user}
       initialPlannerState={plannerState}
+      initialHardRules={hardRules}
       authEnabled={isAuthConfigured}
     />
   );

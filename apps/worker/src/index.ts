@@ -23,6 +23,11 @@ import {
   startEnrichmentQueue,
   type EnrichmentQueueRuntime,
 } from './jobs/enrichment-queue';
+import {
+  startPersonalizationQueue,
+  type PersonalizationQueueRuntime,
+} from './jobs/personalization-queue';
+import { runPersonalizationPass } from './personalization/runtime';
 import { startScanJobs, type ScanJobsRuntime } from './jobs/runtime';
 import {
   createPostgresScanOrchestrator,
@@ -63,6 +68,7 @@ function safeDatabaseUrl(url: string): string {
 export interface WorkerRuntime {
   readonly jobs: ScanJobsRuntime;
   readonly enrichment: EnrichmentQueueRuntime;
+  readonly personalization: PersonalizationQueueRuntime;
   stop(): Promise<void>;
 }
 
@@ -150,25 +156,56 @@ export async function startWorkerRuntime(): Promise<WorkerRuntime> {
     ingredients: ingredientBackfill,
     hasUnmappedIngredients: () => hasUnmappedIngredients(db),
   });
-  const enrichment = await startEnrichmentQueue({
+  // Phase 7's nightly pass. Started before the enrichment queue because the
+  // enrichment job is what enqueues it: scoring a recipe Phase 2 has not yet
+  // given a category, tags or a blurb would score it on a blank.
+  const personalization = await startPersonalizationQueue({
     databaseUrl: env.DATABASE_URL,
-    async runEnrichment(signal) {
-      const summary = await enrichmentJobRunner.run(
-        AbortSignal.any([signal, shutdownController.signal]),
-      );
-      if (summary.ingredients !== null) {
-        log(
-          `ingredient mapping: ${summary.ingredients.mappedRows} rows mapped, ` +
-            `${summary.ingredients.remainingRows} remaining` +
-            (summary.ingredients.error === null
-              ? ''
-              : ` — ${summary.ingredients.error}`),
-        );
-      }
-      return summary;
-    },
+    runPersonalization: (signal) =>
+      runPersonalizationPass({
+        // Rules are pure SQL and run either way; without a provider key the
+        // profile and scoring halves are simply skipped.
+        client: hasEnv('OPENROUTER_API_KEY') ? llmClient : null,
+        dailyBudgetUsd: env.LLM_DAILY_BUDGET_USD,
+        signal: AbortSignal.any([signal, shutdownController.signal]),
+      }),
     logger,
   });
+
+  let enrichment: EnrichmentQueueRuntime;
+  try {
+    enrichment = await startEnrichmentQueue({
+      databaseUrl: env.DATABASE_URL,
+      async runEnrichment(signal) {
+        const summary = await enrichmentJobRunner.run(
+          AbortSignal.any([signal, shutdownController.signal]),
+        );
+        if (summary.ingredients !== null) {
+          log(
+            `ingredient mapping: ${summary.ingredients.mappedRows} rows mapped, ` +
+              `${summary.ingredients.remainingRows} remaining` +
+              (summary.ingredients.error === null
+                ? ''
+                : ` — ${summary.ingredients.error}`),
+          );
+        }
+        // The last link of the nightly chain. Enqueued even after a partial
+        // run: the readers whose recipes did enrich should not wait a day for
+        // the ones that did not.
+        const jobId = await personalization.enqueue('post-enrichment');
+        log(
+          jobId === null
+            ? 'personalization already queued or active'
+            : `personalization enqueued as job ${jobId}`,
+        );
+        return summary;
+      },
+      logger,
+    });
+  } catch (error) {
+    await personalization.stop();
+    throw error;
+  }
 
   let jobs: ScanJobsRuntime;
   try {
@@ -191,6 +228,12 @@ export async function startWorkerRuntime(): Promise<WorkerRuntime> {
         const summary = mergeScanSummaries(blogSummary, redditSummary);
         if (hasEnv('OPENROUTER_API_KEY')) {
           await enrichment.enqueue('post-scan');
+        } else {
+          // Without a provider key nothing will enqueue personalization at the
+          // end of enrichment, because enrichment never runs. The rules half
+          // still has to be re-derived nightly, or a filter outlives the
+          // ratings that justified it.
+          await personalization.enqueue('post-scan');
         }
         return summary;
       },
@@ -198,7 +241,7 @@ export async function startWorkerRuntime(): Promise<WorkerRuntime> {
       logger,
     });
   } catch (error) {
-    await enrichment.stop();
+    await Promise.allSettled([enrichment.stop(), personalization.stop()]);
     throw error;
   }
 
@@ -221,7 +264,7 @@ export async function startWorkerRuntime(): Promise<WorkerRuntime> {
   }
 
   log('──────────────────────────────────────────────────────────');
-  log('  recipes worker — ingestion + Phase 2 enrichment');
+  log('  recipes worker — ingestion, Phase 2 enrichment, personalization');
   log(`  database reachable, ${seeded} canonical ingredients seeded`);
   log(
     `  daily scan: ${env.SCAN_CRON_SCHEDULE} (${env.SCAN_CRON_TIMEZONE}); ` +
@@ -231,12 +274,17 @@ export async function startWorkerRuntime(): Promise<WorkerRuntime> {
     `  enrichment budget: $${env.LLM_DAILY_BUDGET_USD.toFixed(2)}/day; ` +
       `${hasEnv('OPENROUTER_API_KEY') ? 'OpenRouter configured' : 'OpenRouter not configured'}`,
   );
+  log(
+    '  personalization: hard rules always; profile and scoring ' +
+      `${hasEnv('OPENROUTER_API_KEY') ? 'enabled' : 'skipped (no provider key)'}`,
+  );
   log('──────────────────────────────────────────────────────────');
 
   let stopping: Promise<void> | undefined;
   return {
     jobs,
     enrichment,
+    personalization,
     stop() {
       stopping ??= (async () => {
         shutdownController.abort(
@@ -246,6 +294,7 @@ export async function startWorkerRuntime(): Promise<WorkerRuntime> {
           const stopped = await Promise.allSettled([
             jobs.stop(),
             enrichment.stop(),
+            personalization.stop(),
           ]);
           const failures = stopped.flatMap((result) =>
             result.status === 'rejected' ? [result.reason] : [],
@@ -256,7 +305,9 @@ export async function startWorkerRuntime(): Promise<WorkerRuntime> {
         } finally {
           await client.end({ timeout: 5 });
         }
-        log('scan/enrichment queues, scheduler, and database pool stopped');
+        log(
+          'scan/enrichment/personalization queues, scheduler, and database pool stopped',
+        );
       })();
       return stopping;
     },

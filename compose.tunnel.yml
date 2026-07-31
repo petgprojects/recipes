@@ -1,0 +1,63 @@
+# Cloudflare Tunnel overlay — how the app is reachable at a public hostname
+# without opening a port on the server.
+#
+#   docker compose -f docker-compose.yml -f compose.prod.yml -f compose.tunnel.yml up -d --build
+#
+# `cloudflared` dials *out* to Cloudflare and receives requests over that
+# connection, so the server needs no inbound firewall rule, no published port and
+# no TLS certificate of its own — Cloudflare terminates TLS at its edge and the
+# last hop to `web` is plain HTTP inside the compose network. That is also why
+# compose.prod.yml can stop publishing anything to the host.
+#
+# ── why this is a third file and not part of compose.prod.yml ─────────────────
+# `TUNNEL_TOKEN` is required, and compose resolves `${VAR:?}` for the whole file
+# before it filters services by profile — so a required variable in the prod
+# overlay would break `docker compose -f docker-compose.yml -f compose.prod.yml
+# config` for anyone smoke-testing the production build locally, tunnel or no
+# tunnel. Keeping it in its own overlay makes the requirement apply exactly when
+# you ask for it.
+#
+# ── one-time setup in the Cloudflare dashboard ───────────────────────────────
+# Zero Trust → Networks → Tunnels → Create a tunnel (choose "Cloudflared"):
+#
+#   1. Name it, then copy the token out of the install command it shows you.
+#      Put it in `.env` as TUNNEL_TOKEN — it is a credential, so it is never
+#      passed on the command line here (it would show up in `ps` and in shell
+#      history); cloudflared reads it from the environment instead.
+#   2. Public Hostnames → Add: hostname `recipes.petergelgor.ca`, service
+#      `http://web:3000`. `web` is the compose service name and resolves on the
+#      shared network; it is not reachable from anywhere else.
+#   3. Cloudflare creates the DNS record for you. Do not also add an A record.
+#
+# The route lives in the dashboard rather than in a config file on the server on
+# purpose: the tunnel is "remote-managed", so this overlay stays a single service
+# with no mounted config and no credentials file to keep in sync.
+#
+# ── things that will bite ────────────────────────────────────────────────────
+# * `NEXT_PUBLIC_APP_URL` must be the public origin *at build time* — it is baked
+#   into the client bundle. See compose.prod.yml and .env.example.
+# * The hostname in step 2 must match the Google OAuth redirect URI exactly
+#   (`https://recipes.petergelgor.ca/api/auth/callback/google`). See PROGRESS.md
+#   amendment A22.
+# * cloudflared preserves the original `Host` header, which Next.js needs: it
+#   compares `Origin` against the host it sees and rejects Server Actions when
+#   they disagree, and `lib/auth-actions.ts` signs in through one. If sign-in
+#   ever fails with "Invalid Server Actions request", that check is the cause and
+#   `experimental.serverActions.allowedOrigins` in next.config.ts is the fix.
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    # `--no-autoupdate` because the container is the update mechanism: an
+    # in-place self-update would replace the binary under a process compose is
+    # supervising, and `docker compose pull` is the intended path instead.
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?TUNNEL_TOKEN is required by compose.tunnel.yml — copy it from the Cloudflare dashboard into .env, or drop this overlay}
+    depends_on:
+      # Not just `started`: the tunnel advertises the hostname as soon as it
+      # connects, and a public URL that 502s for the ~60s a cold Next.js start
+      # takes is worse than one that appears a minute late.
+      web:
+        condition: service_healthy

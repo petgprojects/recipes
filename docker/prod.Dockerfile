@@ -1,6 +1,8 @@
 # Production image. Multi-stage: one install/build stage, then a slim runtime.
-# Used by compose.prod.yml. Not exercised by Phase 0 — the dev stack is the
-# tested path, this is the shape production will take.
+# Used by compose.prod.yml. First actually built and run on 2026-07-29, which
+# immediately found two bugs that no test could see — a build with no
+# DATABASE_URL and a volume the `node` user could not write. Both are fixed and
+# annotated below; PROGRESS.md amendment A22 has the reasoning.
 #
 # `target: web-runtime` builds Next; `target: worker-runtime` runs the worker
 # under tsx (the workspace packages ship raw .ts by design, so the worker has no
@@ -32,20 +34,40 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # a build arg — setting it at run time would have no effect.
 ARG NEXT_PUBLIC_APP_URL=http://localhost:3000
 ENV NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+# The build needs a *parseable* DATABASE_URL and never connects to it. `/` and
+# `/api/health` both import `@recipes/shared/env`, whose Zod validation runs at
+# module scope, and Next evaluates every route module during "collect page data";
+# without the variable the build fails there. Nothing queries: both are
+# `force-dynamic`, so neither is prerendered.
+#
+# `.env` is deliberately in `.dockerignore` — secrets must not enter an image
+# layer — so the value cannot simply be inherited from the repo, and it is an ARG
+# rather than an ENV so it does not persist into the runtime image and shadow the
+# real one compose injects. A wrong value at *run* time must fail loudly rather
+# than quietly point somewhere else.
+ARG DATABASE_URL=postgresql://build:build@localhost:5432/build
 # `next build` typechecks and compiles the transpiled workspace packages too.
-# DATABASE_URL is only read at request time, never during the build.
-RUN pnpm --filter @recipes/web run build
+RUN DATABASE_URL=$DATABASE_URL pnpm --filter @recipes/web run build
 
 FROM web-build AS web-runtime
 ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
+# The `recipe-images` volume mounts here, and `data/` is in `.dockerignore`, so
+# without this the path does not exist in the image — Docker then creates the
+# mountpoint root-owned and the `node` user cannot write to it. web only reads
+# the directory, but it is created identically in both runtime stages so the two
+# agree about ownership of a volume they share.
+RUN mkdir -p /app/data/images && chown -R node:node /app/data
 USER node
 CMD ["pnpm", "--filter", "@recipes/web", "run", "start"]
 
 # ── worker ───────────────────────────────────────────────────────────────────
 FROM source AS worker-runtime
 ENV NODE_ENV=production
+# The worker is the *writer* of this volume (downloaded, downscaled photos), so
+# this line is load-bearing rather than defensive. See the note on web-runtime.
+RUN mkdir -p /app/data/images && chown -R node:node /app/data
 USER node
 CMD ["pnpm", "--filter", "@recipes/worker", "run", "start"]
 

@@ -22,17 +22,27 @@ import { useEffect } from 'react';
 import { fmtKeeps, fmtLine, fmtRating, fmtTime } from '@recipes/shared/format';
 import { useRecipeDetail } from '@/lib/api';
 import type { RecipeSummary } from '@/lib/recipe-types';
+import { RatingForm } from './rating-form';
 import { RecipePhoto } from './recipe-photo';
 
 interface RecipeSheetProps {
   recipe: RecipeSummary;
   saved: boolean;
   batches: number;
+  /** Whether a cook log can be written for this recipe right now (Phase 6). */
+  signedIn: boolean;
   onToggleSave: (recipeId: string) => void;
   onClose: () => void;
 }
 
-export function RecipeSheet({ recipe, saved, batches, onToggleSave, onClose }: RecipeSheetProps) {
+export function RecipeSheet({
+  recipe,
+  saved,
+  batches,
+  signedIn,
+  onToggleSave,
+  onClose,
+}: RecipeSheetProps) {
   const { data, isPending, isError, error } = useRecipeDetail(recipe.id);
 
   useEffect(() => {
@@ -131,6 +141,9 @@ export function RecipeSheet({ recipe, saved, batches, onToggleSave, onClose }: R
               : `This source published no step list we could parse. Read it on ${recipe.sourceName}.`}
           </p>
         )}
+
+        <div className="mp-h3">Rate it</div>
+        <RatingForm recipeId={recipe.id} signedIn={signedIn} />
 
         <p className="mp-note">
           Recipe by {recipe.author ?? recipe.sourceName}.{' '}

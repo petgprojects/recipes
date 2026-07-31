@@ -4,7 +4,10 @@
  */
 
 import { useQueries, useQuery, type UseQueryResult } from '@tanstack/react-query';
+import type { GroceryAisleGroup } from '@recipes/shared/grocery';
 import type { CheckedMap, PlannerState, SavedMap } from '@recipes/shared/planner';
+import type { CookLogCreate, CookLogEntry } from '@recipes/shared/ratings';
+import type { HardRule } from '@recipes/shared/personalization';
 import type { RecipeDetail, RecipeSummary } from './recipe-types';
 
 /** PLAN.md §5: "TanStack Query with `refetchInterval` (~5 min)". */
@@ -120,7 +123,7 @@ export function useRecipeDetail(id: string | null) {
   });
 }
 
-/** Details for every saved recipe — the grocery list's raw material. */
+/** Details for every saved recipe — what the picks tab shows. */
 export function useSavedRecipeDetails(ids: readonly string[]): UseQueryResult<RecipeDetail>[] {
   return useQueries({
     queries: ids.map((id) => ({
@@ -128,6 +131,40 @@ export function useSavedRecipeDetails(ids: readonly string[]): UseQueryResult<Re
       queryFn: () => fetchRecipeDetail(id),
       staleTime: POLL_INTERVAL_MS,
     })),
+  });
+}
+
+// ── Grocery list (Phase 5) ──────────────────────────────────────────────────
+
+export const groceryKeys = {
+  list: (picks: GroceryPick[]) => ['grocery', 'list', picks] as const,
+};
+
+export interface GroceryPick {
+  recipeId: string;
+  batches: number;
+}
+
+export function fetchGroceryList(picks: GroceryPick[]): Promise<GroceryAisleGroup[]> {
+  return sendJson<GroceryAisleGroup[]>('/api/grocery', 'POST', { picks });
+}
+
+/**
+ * The receipt, merged in the database.
+ *
+ * Phase 3 fetched `/api/recipes/:id` once per pick and merged in a `useMemo`;
+ * this is one request that returns the finished list. The query key carries the
+ * picks, so changing a batch count refetches — and `placeholderData` keeps the
+ * previous list on screen while it does, because a receipt that blanks out
+ * every time a stepper is clicked reads as breakage.
+ */
+export function useGroceryQuery(picks: GroceryPick[], enabled: boolean) {
+  return useQuery({
+    queryKey: groceryKeys.list(picks),
+    queryFn: () => fetchGroceryList(picks),
+    enabled,
+    placeholderData: (previous: GroceryAisleGroup[] | undefined) => previous,
+    staleTime: POLL_INTERVAL_MS,
   });
 }
 
@@ -171,4 +208,73 @@ export function importPlannerState(local: {
   checked: CheckedMap;
 }): Promise<PlannerImportResult> {
   return sendJson<PlannerImportResult>('/api/planner/import', 'POST', local);
+}
+
+// ── Cook logs (Phase 6) ─────────────────────────────────────────────────────
+
+export const cookLogKeys = {
+  list: (recipeId: string) => ['cookLogs', 'list', recipeId] as const,
+};
+
+export function fetchCookLogs(recipeId: string): Promise<CookLogEntry[]> {
+  return getJson<CookLogEntry[]>(`/api/ratings?recipeId=${recipeId}`);
+}
+
+/** Only enabled once there is a signed-in reader — logged out, this 401s. */
+export function useCookLogsQuery(recipeId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: cookLogKeys.list(recipeId),
+    queryFn: () => fetchCookLogs(recipeId),
+    enabled,
+    staleTime: POLL_INTERVAL_MS,
+  });
+}
+
+/** Returns the recipe's whole updated log list, same shape the query caches. */
+export function createCookLog(input: CookLogCreate): Promise<CookLogEntry[]> {
+  return sendJson<CookLogEntry[]>('/api/ratings', 'POST', input);
+}
+
+export function deleteCookLog(id: string, recipeId: string): Promise<CookLogEntry[]> {
+  return sendJson<CookLogEntry[]>(
+    `/api/ratings/${id}?recipeId=${recipeId}`,
+    'DELETE',
+  );
+}
+
+// ── Hard rules (Phase 7) ────────────────────────────────────────────────────
+
+export const hardRuleKeys = {
+  /**
+   * A module constant, not a fresh array — the same reasoning as
+   * `plannerKeys.state()`. This key is a `useEffect`/`useQuery` dependency, and
+   * a new identity per render restarts the query on every render.
+   */
+  list: ['hardRules', 'list'] as const,
+};
+
+export function fetchHardRules(): Promise<HardRule[]> {
+  return getJson<HardRule[]>('/api/preferences/rules');
+}
+
+/**
+ * Enabled only for a signed-in reader: signed out there are no rules, the feed
+ * is unfiltered by definition, and the endpoint 401s.
+ */
+export function useHardRulesQuery(enabled: boolean, initialData: HardRule[] | undefined) {
+  return useQuery({
+    queryKey: hardRuleKeys.list,
+    queryFn: fetchHardRules,
+    enabled,
+    initialData: enabled ? initialData : undefined,
+    // The server rendered these on this very page load; refetching on mount is
+    // a wasted round-trip, same reasoning as the browse feed and planner state.
+    initialDataUpdatedAt: () => Date.now(),
+    staleTime: POLL_INTERVAL_MS,
+  });
+}
+
+/** Returns the whole updated rule list, same shape the query caches. */
+export function setHardRuleEnabled(ruleId: string, enabled: boolean): Promise<HardRule[]> {
+  return sendJson<HardRule[]>('/api/preferences/rules', 'PATCH', { ruleId, enabled });
 }

@@ -4,18 +4,34 @@
 #   docker compose -f docker-compose.yml -f compose.prod.yml up -d --build
 #
 # Thin by design: it changes the build target, drops every bind mount and
-# anonymous node_modules volume, and flips NODE_ENV. `db` is inherited unchanged.
+# anonymous node_modules volume, flips NODE_ENV, and stops exposing anything on
+# the host beyond one loopback port for debugging.
 #
-# NOT exercised by Phase 0 — the dev stack is the tested path. Things to check
-# the first time this is used for real: NEXT_PUBLIC_APP_URL must be the public
-# origin (it is baked into the client bundle at build time, so it cannot be
-# changed by restarting the container), AUTH_SECRET must be set once Phase 4
-# lands, and `db`'s port should probably stop being published to the host.
+# Add compose.tunnel.yml to make it reachable at a public hostname:
+#
+#   docker compose -f docker-compose.yml -f compose.prod.yml -f compose.tunnel.yml up -d --build
+#
+# Brought up and verified end to end on 2026-07-29 in a throwaway project — build,
+# migrate, `next start`, worker — which is what found the two `prod.Dockerfile`
+# bugs (see PROGRESS.md amendment A22). Still unexercised: the tunnel and the
+# Google callback against a real public hostname.
+#
+# Set NEXT_PUBLIC_APP_URL to the public origin before building, and AUTH_SECRET
+# before expecting sign-in to work. A22 has the whole deployment checklist.
 #
 # `!reset` is what removes an inherited list entry — compose merges sequences by
 # union, so without it the dev bind mounts would survive into production.
 
 services:
+  db:
+    # The database stops being reachable from the host. In development the
+    # published port is how psql and drizzle-studio connect; on a server it is an
+    # attack surface with default credentials behind it, and it collides with
+    # whatever Postgres the host may already run. `docker compose exec db psql -U
+    # recipes recipes` replaces it, and `web`/`worker` reach `db:5432` over the
+    # compose network either way.
+    ports: !reset []
+
   migrate:
     build:
       context: .
@@ -40,6 +56,17 @@ services:
       # No file watching in production.
       WATCHPACK_POLLING: "false"
       CHOKIDAR_USEPOLLING: "false"
+    # Loopback only, and `!override` so the dev stack's `0.0.0.0` mapping is
+    # replaced rather than unioned with this one. Public traffic arrives through
+    # compose.tunnel.yml, which reaches `web:3000` over the compose network and
+    # does not need a published port at all; this mapping exists so you can
+    # `curl localhost:$WEB_PORT/api/health` from an SSH session.
+    #
+    # Set WEB_PORT in .env when the server already runs something on 3000. Only
+    # the host side moves — the container keeps binding 3000, which is what the
+    # inherited healthcheck and the tunnel's public-hostname route both name.
+    ports: !override
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
     volumes: !override
       # The image is self-contained; only the shared image cache is stateful.
       - recipe-images:/app/data/images

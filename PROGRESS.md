@@ -14,11 +14,21 @@ on Peter**.
 | `OPENROUTER_API_KEY` | Phase 2 | ✅ configured in local `.env` (never printed or committed) |
 | Reddit API credentials | Phase 2 (Reddit source only) | ⛔ blocked — see below |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `AUTH_SECRET` | Phase 4 | ✅ configured in local `.env` (never printed or committed) |
+| Google console: deployed redirect URI + verified domain | Deployment | ⏳ Peter's to do — see below |
+| `TUNNEL_TOKEN` | Deployment (Cloudflare Tunnel) | ⏳ Peter's to do — Cloudflare Zero Trust → Networks → Tunnels |
 
 Google OAuth redirects to the exact callback
 `http://localhost:3000/api/auth/callback/google`, and Peter's email is an
 allowed test user. All three Phase 4 secrets are now in the local `.env`, and a
 real end-to-end Google sign-in has been driven through the live app.
+
+**Deploying to a public hostname** needs two things only Peter's Google account
+can do, and the second one has a wait in it. On the *existing* OAuth client, add
+`https://<host>/api/auth/callback/google` to the authorized redirect URIs and
+keep the localhost entry — one client serves both environments. Then add the
+domain to the consent screen's *Authorized domains*, which Google will not accept
+until the domain is verified in Search Console via a DNS record. The code side is
+done; amendment A22 has the full checklist and the reasons.
 
 **Reddit blocker.** App creation at reddit.com/prefs/apps fails with the
 "Responsible Builder Policy" message; browser console shows a 401 from
@@ -267,6 +277,385 @@ Signed-in edits deliberately do **not** write to `localStorage`. The browser's
 anonymous state is left exactly as it was, so signing out returns to it rather
 than to a half-copy of the account.
 
+### A18 — The semantic mapper's `existing` claim is guarded, and a missed merge beats a wrong one
+*Phase 5, from the audit PLAN.md's Phase 5 note asked for.*
+
+A sampled audit of the Phase 2 mapping before putting these joins under SQL
+found a systematic defect. The provider-facing schema pins `canonical_name` to
+a `z.enum` of the **entire** canonical vocabulary — 774 names at the time — so
+once the model emits `"action":"existing"` the constrained decoder *must* pick
+some member of that enum. When the right answer is not in there, it picks a
+neighbour. That produced `ketchup` → `kalamata olives`, `tahini` /
+`tapioca flour` / `tapioca starch` / `tamarind pulp` / `tequila` →
+`taco seasoning`, `cauliflower` → `capers`, `brandy` / `branzino` / `burrata` →
+`brown rice`, `chopped chives` → `chickpeas`, `swiss chard` →
+`sweet potatoes`, `white wine vinegar` → `white rice`, and a bunch of flat-leaf
+parsley → `mushrooms`.
+
+Two properties made it worse than a one-off. Every wrong decision is written to
+`ingredient_aliases`, and the deterministic matcher answers from there first, so
+one bad decision re-maps every future line with that spelling — `ketchup` was
+wrong eight times from a single mistake. And the failure is silent: the row
+still renders from `raw_text`, so nothing looks broken until the wrong canonical
+merges a quantity into someone else's item on a grocery list, which is exactly
+what Phase 5 makes matter.
+
+**The guard.** `isPlausibleCanonicalMatch()` in `@recipes/shared/ingredients`
+rejects an `existing` decision whose input and canonical share no identity
+word, ignoring preparation, packaging and colour words. A rejected decision is
+rewritten as `action: "new"` on the reader's own words rather than being merged
+into someone else's ingredient. This is why `existing` decisions now carry an
+`aisle` even though the database already knows it: without one, a rejected
+decision would need a second provider round-trip to find out where the item is
+sold.
+
+**The guard is deliberately blunt, and it is blunt in one direction.** It
+cannot tell `garbanzo beans` → `chickpeas` (right) from `chopped chives` →
+`chickpeas` (wrong), so it rejects both. A wrongly-rejected synonym becomes its
+own canonical and shows up as a second line on the receipt, which a reader can
+see and shrug at; a wrong merge is a quantity nobody can tell is wrong. The
+existing correct synonyms in `ingredient_aliases` are matched exactly and never
+reach the guard, so this constrains only names the corpus has not seen before.
+
+**What it does not catch.** Names that share a real word but are different
+products — `green bell pepper` → `red bell pepper`, `green cabbage` →
+`red cabbage`, `grated lime zest` → `lemon zest`, `butter lettuce leaves` →
+`butter`. Those were repaired by hand in the data and remain a known limitation
+of a lexical test.
+
+**The repair.** `apps/worker/scripts/repair-mismapped-ingredients.ts` holds the
+31 hand-read alias corrections, deletes them, and returns the 63 affected rows
+to the backfill queue by nulling `ingredient_id`. It identifies rows the way the
+backfill does — parse the line, take `ingredientAliasKey()` of the parsed name —
+not by matching text against `raw_text`, which would both miss rows and catch
+rows that reached the same ingredient by a correct alias. It is a dry run
+unless given `--apply`.
+
+Arguable merges were deliberately left alone: `cumin seeds` → `ground cumin`,
+`nonstick cooking spray` → `baking spray`, `vanilla bean paste` →
+`vanilla extract`. They are debatable, not wrong, and re-mapping them would
+spend provider calls to probably land in the same place.
+
+### A19 — SQL merges the grocery list; TypeScript still chooses the units
+*Phase 5.*
+
+PLAN.md §5 says to port the aggregation to SQL "with the batch multiplier and
+in-dimension unit conversion". The merge moved; the printing did not, and the
+split is on purpose.
+
+The query in `apps/web/src/lib/grocery.ts` owns everything that decides *which
+lines share a line on the receipt*: the join, the batch multiplier,
+`grocery_checks.item_key`, whose name and aisle win, and the per-unit
+subtotals. It stops before deciding whether a total reads `1⅛ cup` or
+`18 tbsp`, because that needs the conversion table in `@recipes/shared/units`
+and the vulgar fractions in `@recipes/shared/format`. Reimplementing those in
+SQL would give this project two copies of its unit vocabulary in two languages,
+and the copies would drift — quietly, in a way that only shows up as a wrong
+number on a shopping list.
+
+So both implementations converge on `finalizeGroceryBuckets()`. What *is*
+generated into SQL is the unit alias table itself: `unitAliasValues()` walks the
+exact records `normalizeUnit()` uses and emits one row per alias, with the
+dimension key taken from `unitDimensionKey()` rather than recomputed. Adding a
+unit to `units.ts` puts it in the query too, with nothing to remember.
+
+Three things had to agree character for character with the TypeScript, because
+a difference in any of them would give the same shopping line two different
+`item_key`s depending on which path built it, and a reader's check-offs would
+silently stop matching their list:
+
+1. the `slugify()` of an unmapped row's `raw_text` — lower, NFKD, non-alphanumerics
+   to dashes, trim dashes, then cut to 80 (that order);
+2. `normalizeUnit()`'s case-sensitive-first lookup — `T` is tablespoon and `t`
+   is teaspoon, so lower-casing before the lookup would triple every `t` — and
+   its treatment of a NULL unit as `''`, which reaches `each`;
+3. the `unit:` fallback slug for an unrecognised unit, which is *not*
+   dash-trimmed, unlike the raw-text slug.
+
+**The batch multiplier multiplies in `float8`, not `numeric`.** The in-memory
+implementation multiplies IEEE-754 doubles; a `numeric` product cast to `float8`
+afterwards rounds differently in the last bit, and the differential test
+compares exact values.
+
+**Bucket order is now part of the contract.** Two items can sort equal by name —
+the same ingredient bought by the clove and by the each — and the sort that
+groups them is stable, so insertion order breaks the tie. A `group by` returns
+rows in whatever order it likes, so `finalizeGroceryBuckets()` sorts by the
+bucket's `order` before inserting. Without this the two implementations differ
+by a swap of two adjacent lines, which is exactly the kind of difference nobody
+would notice by eye.
+
+`apps/web/test/grocery-sql.integration.test.ts` runs both implementations over
+every active recipe in the database and demands they agree.
+`packages/shared/test/grocery.test.ts` remains the specification of what a
+correct list *is*; neither suite is sufficient alone.
+
+### A20 — Hard rules filter on recipe columns only; aspects feed the soft profile
+*Phase 7.*
+
+PLAN.md §5 lists the deterministic rules as "`median(rating) WHERE
+total_minutes > 60` … Same for cost aspects, cleanup aspects, categories." The
+time, category and tag rules are implemented as written. The cost and cleanup
+ones are not, and cannot be, in the form the sentence implies.
+
+An aspect is a property of **a cook**, recorded on `cook_logs.aspects` by the
+person who cooked it. `recipes` has no corresponding column and could not have
+one: the database cannot answer "is this recipe expensive?" or "does this
+recipe make a mess?" about a recipe nobody has cooked yet. A hard rule is a
+`WHERE` clause over the browse feed, which is mostly recipes with no cook logs
+at all, so there is nothing for an aspect-derived rule to test against. Writing
+one anyway would produce a filter that silently matches nothing.
+
+The signal is real and it is not discarded — `expensive`, `too_much_cleanup`
+and the rest are exactly what step 2 feeds to the model, which is the part of
+the loop allowed to reason from a pattern instead of filtering on a column.
+That is also the honest division of labour between the two halves: the SQL half
+gets the things a column can prove, the prose half gets the things it cannot.
+
+Three further decisions inside the deterministic half, all of them erring the
+same direction as A18 — a missed filter beats a wrong one, because a filter
+that hides too much hides it invisibly:
+
+1. **Median, not mean.** One furious 1★ among nine 4★ moves a mean enough to
+   trip a threshold and does not move a median at all.
+2. **The time ladder emits its loosest triggering threshold.** The buckets are
+   nested — everything over 90 minutes is also over 30 — so a reader who loves
+   40-minute dinners and loathes 3-hour braises drags the ">30" median down
+   with the braises alone. Emitting `max_minutes: 30` off that evidence would
+   hide the very recipes they rated 5★.
+3. **A rule the reader switched off stays off**, and is kept in the column even
+   after its evidence evaporates. Re-deriving it as enabled would make the
+   switch not work; dropping it would silently re-arm the filter the moment the
+   pattern came back. `mergeHardRules()` refreshes the evidence on a disabled
+   rule but never its `enabled` flag.
+
+`user_preferences.hard_rules` is a `jsonb` column, so it is *parsed*, not cast,
+on the way out (`parseHardRules()`): an older deploy's shape or a hand edit in
+psql should cost that one rule its filter, not take the browse feed down.
+
+**Every clause keeps a row whose column is null.** A rule exists because of what
+a reader disliked about recipes we have data for. A recipe whose `total_minutes`
+or `category` Phase 2 could not derive has not been disliked — it is unknown —
+and hiding it would let missing data act as a preference.
+
+**A rule change is not a "new recipes" pill.** The pill (A13) exists so a
+background poll cannot re-sort the list under someone mid-scroll. A switch is
+the opposite: the reader just asked for it, is looking at the panel that did it,
+and the recipes it un-hides are not new arrivals — they are recipes we were
+hiding from them. `Planner` therefore adopts the next feed directly through
+`adoptNextFeed`, flagged *before* the invalidate because the refetch can resolve
+in the same tick. Without this, switching a filter off announces "10 new
+recipes", which is a lie about where they came from.
+
+### A21 — Scores are addressed by ref, missing ones are neutral, and a changed profile invalidates them
+*Phase 7.*
+
+Four decisions in the model half of the loop (PLAN.md §5 steps 2 and 3), each
+of which has a plausible-looking wrong version that fails silently.
+
+**1. The model never sees a recipe id.** A batch goes out numbered `ref: 1…20`
+and comes back the same way; `resolveScoreBatch()` maps refs to ids locally. A
+36-character UUID is exactly the token a model mistypes, and a mistyped id in a
+batch of twenty writes a score against the wrong recipe — invisible, and wrong
+in the direction personalization can least afford. A bad `ref` is droppable; a
+plausible-looking UUID is not. The response schema is built per batch, so its
+`ref` ceiling is that batch's length and an out-of-range ref is refused at the
+provider rather than dropped on the way back.
+
+The resolver is also the reason a short, long, duplicated or renumbered
+response costs rows and never correctness: unknown refs are dropped, a repeated
+ref keeps its first answer, scores are clamped, and a missing ref simply leaves
+that recipe unscored — a state the whole system already handles.
+
+**2. An unscored recipe sorts as neutral, not last.** `listRecipes()` orders by
+`coalesce(score, 50)`, not by `score desc nulls last`. Same principle as A20's
+null-keeping `WHERE` clauses: a recipe crawled this morning has no score
+because the nightly pass has not reached it, not because it is a bad match.
+Sorting it last would bury every new arrival under the whole corpus and make
+the "N new recipes" pill point at something nobody can find; sorting it first
+would put unranked rows above a 95. Signed out, every score is null, every row
+coalesces to the same number, and the browse order is byte-identical to what it
+was before Phase 7 touched the query — which is what keeps the server render
+usable as the client's `initialData`.
+
+**3. A changed profile rescores everything.** A score is an answer to the
+question the profile asked; when the profile text changes, the old scores are
+not stale-but-usable, they are answers to a different question.
+`deriveProfileForUser()` reports whether the stored text actually moved and the
+pass passes that through as `refreshAll`. Rows are overwritten in place and
+never deleted first, so a reader keeps a complete ranking throughout, including
+when the run stops on budget.
+
+Two consequences worth stating. Scoring deliberately **ignores hard rules** —
+it scores recipes a rule currently hides, because the reader can flip that
+switch at any moment and a feed that came back unranked the instant they did
+would look broken; the wasted spend is cents. And the cold-start floor
+(`MIN_RATED_RECIPES_FOR_SCORING`, 5) counts **distinct recipes rated**, not cook
+logs: someone who cooked one chili five times has told us one thing about
+themselves five times. The floor gates step 2 as well as step 3, because a
+profile nothing is allowed to score against is a provider call bought for
+nothing.
+
+**4. Three writers share `user_preferences`, and each owns one column.** The
+nightly rules job owns `hard_rules`, the reader's switch owns `enabled` inside
+it, and the profile job owns `profile`. Every `onConflictDoUpdate` in all three
+lists only its own column plus `updated_at`. A full-row upsert would silently
+revert whichever writer ran first, and the three run minutes apart.
+
+The reason line shown on the card is deliberately *not* PLAN.md's example
+sentence ("because you rated 4 other sheet-pan recipes 5★"). The scoring prompt
+is given the profile and the recipe's facts — not the cook history, which is
+what makes the call batchable and cheap — so it has no counts to cite, and
+asking for that phrasing would be asking it to invent them. The prompt requires
+a clause grounded in the profile instead, and forbids counts and star ratings
+outright.
+
+### A22 — A public origin is configuration, not a port change
+*Deployment. Raised by Peter on 2026-07-29: "am I stuck with localhost:3000?"*
+
+No. Nothing in the app hardcodes an origin — `AUTH_URL` and
+`NEXT_PUBLIC_APP_URL` are Zod-declared with localhost *defaults*, and
+`docker-compose.yml` derives the first from the second. A16's constraint is
+often misread as "Google only allows localhost"; what it actually says is that
+Auth.js must be told its origin explicitly rather than inferring `0.0.0.0` from
+`request.url`. A public hostname satisfies that requirement the same way
+localhost does, and satisfies it better — Google's loopback exemption is the
+narrow case, not the normal one.
+
+So the port is the whole change, and it is four settings and two console steps.
+The parts that are not obvious:
+
+**1. `NEXT_PUBLIC_APP_URL` is a build input by contract, though not yet in
+practice.** `next build` inlines any *referenced* `NEXT_PUBLIC_*` variable into
+the client bundle, which is why `compose.prod.yml` passes it as a build arg;
+editing `.env` and restarting would then leave the server on the new origin and
+the shipped JavaScript on the old one. Measured against the built image, though,
+the string does not appear in `apps/web/.next/static` at all: nothing in
+`apps/web/src` reads it. Today its only readers are `AUTH_URL`'s derivation in
+compose and the worker's OpenRouter `HTTP-Referer` header, both runtime.
+
+So set it before `docker compose build` and treat a change as a rebuild — that is
+the rule that stays correct the first time a client component reads it, and the
+cost of following it is nothing. But when a deployment misbehaves, this is not
+where to look first: `AUTH_URL` is the value that decides sign-in, and it is
+purely runtime.
+
+**2. An `https` origin silently changes the cookies.** Auth.js decides cookie
+`Secure` and the `__Secure-`/`__Host-` name prefixes from whether its URL is
+`https`. Behind Cloudflare the last hop to the container is plain HTTP, but the
+browser's connection is HTTPS, so the https value is the correct one and the
+cookies work. The failure mode to know: serving the *public* origin over plain
+HTTP with an `https` `AUTH_URL`, or the reverse, produces a sign-in that
+completes and then has no session, because the cookie the browser was told to
+set is not one it will send back.
+
+**3. Google's consent screen needs the domain verified, and this is the step with
+a wait.** The redirect URI itself is a one-line addition to the existing OAuth
+client — a client holds many, so `http://localhost:3000/api/auth/callback/google`
+and the deployed callback coexist and one client serves both environments. But
+the consent screen's *Authorized domains* list will not accept a domain until
+Google agrees you own it, which means verifying it in Search Console with a DNS
+record first. `localhost` is exempt from all of this, which is exactly why Phase
+4 never met it.
+
+**4. Cloudflare Tunnel rather than an open port.** `compose.tunnel.yml` adds one
+`cloudflared` service that dials out and receives requests over that connection:
+no inbound firewall rule, no certificate on the server, and the route
+(`recipes.petergelgor.ca` → `http://web:3000`) lives in the Cloudflare dashboard
+rather than in a config file to keep in sync. It is a third overlay rather than
+part of `compose.prod.yml` because `TUNNEL_TOKEN` is required and compose
+resolves `${VAR:?}` for a whole file before filtering services by profile —
+inside the prod overlay it would break a local production smoke test for someone
+who wants no tunnel at all.
+
+**5. The prod overlay now publishes almost nothing.** `db` stops being reachable
+from the host (default credentials on a public machine, and a collision with any
+Postgres the host already runs; `docker compose exec db psql -U recipes recipes`
+replaces it), and `web` binds `127.0.0.1:${WEB_PORT}` only, for `curl`ing
+`/api/health` over SSH. `WEB_PORT` already existed and moves only the host side
+of the mapping — the container keeps binding 3000, which is what the healthcheck
+and the tunnel's route both name. A server with something already on 3000 needs
+`WEB_PORT=3100` and nothing else.
+
+`DB_PORT` needs nothing at all in production, since nothing is published. It is
+worth knowing that it is *not* the same kind of knob as `WEB_PORT` for anyone who
+publishes the database deliberately: `DATABASE_URL`'s host-side port has to be
+edited to match by hand, because compose interpolates `.env` into the compose file
+and not into its own values, and `DB_PORT` is read in exactly one line
+(`docker-compose.yml`'s `ports`). On a host that already runs another Postgres
+the mismatch is quiet rather than loud — the stack comes up healthy on `db:5432`
+while host-side tools and the database-backed test suites connect to the
+neighbour on the old port.
+
+**6. A bare `docker compose up -d --build` had to keep meaning something safe.**
+On a server the natural command is the bare one, and bare compose means the *dev*
+stack: `next dev`, bind mounts of a checkout, hot reload, `0.0.0.0:3000` and
+`0.0.0.0:5432`. Adding `COMPOSE_FILE=docker-compose.yml:compose.prod.yml:compose.tunnel.yml`
+to the server's `.env` makes every plain compose command — `up`, `logs`, `ps`,
+`down` — mean the production stack instead, with no `-f` flags to remember and no
+way to bring the dev stack up there by accident. It stays commented out in
+`.env.example` so bare compose keeps meaning dev locally, which is what every
+existing instruction in `AGENTS.md` and `HANDOFF.md` assumes.
+
+**7. Two things in `prod.Dockerfile` were broken, and only building it found
+them.** Both were invisible to every test and to `docker compose config`.
+
+`next build` failed outright. `/` and `/api/health` import `@recipes/shared/env`,
+whose Zod validation runs at module scope, and Next evaluates every route module
+during "collect page data" — so the build needs `DATABASE_URL` present. `.env` is
+in `.dockerignore` (correctly — secrets must not enter an image layer), so there
+was nothing to supply it and the stage could never have succeeded. The fix is a
+build-only `ARG` with a dummy value: nothing connects, because both routes are
+`force-dynamic` and neither is prerendered. It is an `ARG` and not an `ENV` so it
+cannot persist into the runtime image and shadow the real one — verified absent
+from `printenv` in the built image. A bogus `DATABASE_URL` at run time must fail
+loudly, not quietly point somewhere else.
+
+The worker could not have written a single photo. `data/` is in `.dockerignore`,
+so `/app/data/images` was absent from the image; Docker then creates that
+mountpoint for the `recipe-images` volume owned by root, and both runtime stages
+run `USER node`. The image pipeline would have failed on first write, after a
+successful crawl. Both stages now `mkdir -p` and `chown` the directory before
+dropping privileges — the same line in both, because they share the volume and
+must agree about its ownership.
+
+One thing deliberately left alone: `trustHost: true` stays on and stays
+sufficient. With `AUTH_URL` pinned, Auth.js does not need to infer anything from
+forwarded headers, so the proxy hop needs no further configuration. The related
+header dependency is Next.js's, not Auth.js's — Server Actions (`lib/auth-actions.ts`
+signs in through one) are rejected when `Origin` disagrees with the host the
+server sees. cloudflared preserves the original `Host`, so it agrees; a proxy
+that rewrites it would need `experimental.serverActions.allowedOrigins`.
+
+**The prod stack has now actually been run**, which it never had been before —
+that is how the two `prod.Dockerfile` bugs above were found. Verified on
+2026-07-29 in a throwaway project (`-p recipes-prodtest`, `WEB_PORT=3100`, its own
+volumes, `SCAN_BOOTSTRAP_ENABLED=false` so it could not crawl or spend), torn down
+with `down -v` afterwards; the dev project's volumes and its 425 recipes were
+untouched throughout:
+
+- all three images build (`web`, `worker`, `migrate`);
+- `migrate` exits 0 — migrations and the 117-ingredient seed run under `USER node`;
+- `web` serves `/api/health` 200 (`migrated: true`, `seeded: true`), plus `/`,
+  `/ops` and `/api/recipes` 200, as `next start` under `NODE_ENV=production`;
+- `worker` boots clean as `node`, schedules its cron, and `/app/data/images` is
+  writable;
+- no secrets in `apps/web/.next/static`.
+
+**What is still untested** is narrower but real: the Cloudflare Tunnel and the
+Google callback against a public hostname — neither can be exercised without the
+domain, the token and the console changes. Everything on this side of that line
+now has a run behind it. A fresh server also starts with an **empty corpus**: the
+recipes live in the `pgdata` volume and their photos in `recipe-images`, neither
+of which is in the repo, so a new machine seeds 117 ingredients and 0 recipes and
+either re-crawls or restores a dump. `AGENTS.md` holds the runbook for the latter,
+verified the same day by restoring into a throwaway project that then served all
+425 recipes and a real cached photo over HTTP. Its two non-obvious steps: gate on
+a real query rather than `pg_isready` (the postgres image's first-boot init runs a
+transient server on the same socket, so `pg_isready` is ready before the database
+exists), and `chown -R 1000:1000` the image volume after extracting, because tar's
+`./` entry resets it to root and the production images run `USER node`.
+
 ### A3 — Source list resolved (PLAN.md §8, open question 11)
 Budget Bytes, Pinch of Yum, Downshiftology, GypsyPlate, Skinnytaste, The
 Kitchn, Love & Lemons, Serious Eats.
@@ -377,11 +766,70 @@ removes it structurally.
       signed-in edits; sign-out returning to the browser's own 2 picks with
       `/api/planner` answering 401. Merge semantics, idempotence and the
       stale-recipe skip additionally exercised against a minted session.*
-- [ ] **Phase 5 — Grocery list server-side.** SQL aggregation, per-user checks,
-      print + copy-to-clipboard.
-- [ ] **Phase 6 — Ratings.** 1–5 stars, notes, fixed-vocabulary aspect tags.
-- [ ] **Phase 7 — Personalization.** SQL-derived hard rules, LLM soft profile,
-      batched scoring with visible reasons, cold-start guards.
+- [x] **Phase 5 — Grocery list server-side.** ✅ **COMPLETE.**
+    - [x] Sampled audit of the Phase 2 semantic mapping; 31 poisoned aliases and
+          63 rows found, repaired and re-mapped (A18)
+    - [x] `isPlausibleCanonicalMatch()` guard on the mapper's `existing` claim,
+          plus the always-present `aisle` that lets a rejection land (A18)
+    - [x] Aggregation merged in SQL over
+          `saved_recipes × recipe_ingredients × ingredients`, with the batch
+          multiplier and in-dimension merging (A19)
+    - [x] `POST /api/grocery`, serving `saved_recipes` when signed in and the
+          request's picks when signed out — the planner still works signed out
+    - [x] Receipt aesthetic unchanged; the client sends picks instead of
+          fetching every saved recipe's detail
+    - [x] Printable view (`@media print`) and copy-to-clipboard as plain text
+    - [x] Differential integration suite proving SQL ≡ `aggregateGroceries()`
+          over the whole active corpus
+      *Exit verified: 582 tests passing (shared 95, db 20, worker 461, web 8),
+      four typechecks clean, production build clean, secrets absent from the
+      client bundle, and `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`,
+      `/api/images/:file`, `POST /api/grocery` all 200 against the Compose
+      stack after a full dependency-volume refresh. The browser extension was
+      unavailable this session, so the grocery **tab** — print dialog, clipboard
+      button, check-off round-trip — has not been clicked through live; the
+      route, both SQL paths and the plain-text rendering are covered by tests.*
+- [x] **Phase 6 — Ratings.** ✅ **COMPLETE.**
+    - [x] `@recipes/shared/ratings`: `cookLogCreateSchema` (1–5 rating, fixed
+          aspect vocab via the existing `ratingAspectSchema`, bounded notes),
+          reusing `uuidSchema`/`ratingAspectSchema` that Phase 2 had already
+          put in `schemas.ts` for this
+    - [x] `lib/ratings.ts`: list/create/delete over `cook_logs`, with the same
+          "check the recipe exists before the insert" guard `setSavedRecipe`
+          uses, so a stale id 400s instead of a foreign-key 500
+    - [x] `GET/POST /api/ratings`, `DELETE /api/ratings/:id` — all `withUser()`,
+          so signed-out is a 401, not a `localStorage` draft (this flow
+          genuinely needs an account, unlike the grocery list)
+    - [x] Detail-sheet "Rate it" section: star picker, aspect chips, notes,
+          the reader's own history for that recipe with a remove action
+      *Exit verified live (via the in-app Browser pane, not the Chrome
+      extension — that worked fine here): logged a 4-star "Quick / Would
+      repeat" cook on Kalua Pork with a note, confirmed it, its date, aspects
+      and note render correctly, survived a full page reload, and removed
+      cleanly, restoring the empty-history state. Signed out, the form is
+      replaced by "Sign in to log how it turned out." 601 tests passing
+      (shared 104, db 20, worker 461, web 16 — 8 new integration tests against
+      the real database), four typechecks clean, production build clean, new
+      routes `/api/ratings` and `/api/ratings/[id]` registered. `cook_logs` is
+      back to 0 rows after the manual test.*
+- [x] **Phase 7 — Personalization.** ✅ **COMPLETE.**
+    - [x] Hard rules derived deterministically in SQL, applied as a `WHERE`
+          clause, shown in a panel with a per-rule switch (A20)
+    - [x] LLM soft profile in `user_preferences.profile`, behind the
+          distinct-rated-recipes cold-start floor
+    - [x] Batched scoring into `recipe_scores` with a one-line reason, refs
+          rather than ids, neutral ordering for unscored rows (A21)
+    - [x] Score-aware browse ordering above the existing cold-start sort, with
+          the reason rendered on the card
+    - [x] Nightly chain wired: scan → Phase 2 enrichment → personalization
+      *Exit verified live against real OpenRouter, on 12 synthetic cook logs
+      seeded on `dev@local` (6 quick recipes at 5★, 6 over 90 minutes at 1★):
+      three hard rules derived, a profile written that reads exactly like
+      PLAN.md's example, and all 235 active recipes scored in 12 batches with
+      no shortfall for $0.0093. Signed in, browse went 235 → 74 (the rules) in
+      strict score order, 100 down to 10, each card carrying its reason.
+      Signed out, 235 recipes and every score null. All probe rows deleted
+      afterwards.*
 
 ---
 
@@ -678,3 +1126,330 @@ signed-in edits; sign-out returning to those 2 with `/api/planner` answering
 throwaway second instance. All probe rows removed; the database is back to 425
 recipes, 235 active, 190 rejected, 0 pending, with no `saved_recipes` or
 `grocery_checks` rows.
+
+### 2026-07-28 — Phase 5 complete: the grocery list moves into the database
+
+**The audit came first, and it found something.** PLAN.md's Phase 5 note asked
+for a sampled audit of the Phase 2 ingredient mapping before these joins went
+under SQL, on the theory that a wrong canonical is harmless while it only has
+to render and expensive once it has to merge. A random sample of 60 mapped rows
+was clean. The tail was not: `ketchup` → `kalamata olives`, `tahini` and
+`tapioca flour` and `tamarind pulp` → `taco seasoning`, `cauliflower` →
+`capers`, `brandy` → `brown rice`, `white wine vinegar` → `white rice`, a bunch
+of flat-leaf parsley → `mushrooms`.
+
+The shape of the errors gave away the cause. They are not semantic near-misses;
+they are *alphabetical* ones. The provider-facing schema pins `canonical_name`
+to a `z.enum` of all 774 canonical names, so a model that has committed to
+`"action":"existing"` cannot then decline — the decoder has to emit some member
+of the enum, and when the right answer is not in it, it emits a neighbour. And
+because every decision is written to `ingredient_aliases` and the deterministic
+matcher answers from there first, one mistake is permanent and repeats:
+`ketchup` was wrong eight times from a single bad decision.
+
+31 aliases and 63 of 4,456 mapped rows (1.4%). All 31 read by hand, deleted,
+their rows returned to the backfill queue, and re-mapped through the new guard
+in one run — `ketchup` → `ketchup`, `cauliflower` → `cauliflower`, the parsley
+back to `flat-leaf parsley`. The alias table grew by 6 and the canonical table
+by 15, which is what a mapper that is allowed to say "I don't have this one"
+looks like. Amendment A18 records the guard, and records that it is blunt in one
+direction on purpose: it also rejects `garbanzo beans` → `chickpeas`, and a
+missed merge is a second line on a receipt while a wrong merge is a quantity
+nobody can see is wrong.
+
+**Then the port.** The merge is now a join and a `group by`; the unit choice and
+the vulgar fractions stayed in `@recipes/shared`. Amendment A19 explains why
+that seam is where it is, and lists the three expressions that had to match the
+TypeScript character for character — the raw-text slug, `normalizeUnit()`'s
+case-sensitive-first lookup, and the not-dash-trimmed `unit:` fallback — because
+a difference in any of them gives the same shopping line two different
+`item_key`s and a reader's check-offs quietly stop matching their list. The unit
+alias table is generated into the query from the same records `normalizeUnit()`
+reads, so there is no second copy to drift.
+
+**The differential test earned its keep immediately.** It failed on the first
+run, and not on anything the eye would have caught: `garlic cloves` appears
+twice on one receipt — once by the clove, once by the each — the two sort equal
+by name, the sort is stable, and so map insertion order decided which came
+first. In memory that is line order; out of a `group by` it is arbitrary.
+`finalizeGroceryBuckets()` now sorts by bucket order before inserting. The
+suite compares both implementations over every active recipe.
+
+**Signed out still works.** A signed-out reader's picks exist only in their
+browser, so `POST /api/grocery` takes them in the body; a signed-in reader sends
+the same body and the server ignores it in favour of `saved_recipes`, on A17's
+principle that the account wins. The route deliberately does not use
+`withUser()` — a 401 would be the wrong answer to "here are my picks, what do I
+buy".
+
+**Cost.** Nothing beyond the re-mapping run: 63 rows across ~31 distinct names,
+inside the $1/day cap. The port itself makes no LLM calls.
+
+**Verification.** 582 tests passing (shared 95, db 20, worker 461, web 8 — the
+web app has a test suite for the first time, which is what the differential
+suite needed). Four typechecks clean, production build clean, all four secrets
+absent from the client bundle, every endpoint 200 after the documented
+dependency-volume refresh, and both probe users deleted — the database is back
+to 2 users, 0 `saved_recipes`, 0 `grocery_checks`.
+
+**Not verified live.** The Chrome extension was not connected this session, so
+unlike Phases 3 and 4 the grocery **tab** was not clicked through in a real
+browser: the print dialog, the clipboard button and the check-off round-trip
+against the new list are covered by tests and by hand-checked API responses, not
+by a human-visible page. Worth ten minutes at the start of Phase 6.
+
+### 2026-07-28 — Phase 6, ratings
+Skipped the outstanding Phase 5 browser check at Peter's direction and went
+straight to Phase 6. Turned out less new work was needed than PLAN.md implies:
+`cook_logs`, `RATING_ASPECTS` and the `cook_logs_aspects_vocab` check
+constraint were already live, and `packages/shared/src/schemas.ts` already
+exported `uuidSchema` and `ratingAspectSchema` — `z.enum(RATING_ASPECTS)`,
+sitting unused since Phase 2. Phase 6 is the API, the store and the UI over
+what already existed, following the Phase 4/5 split exactly:
+`@recipes/shared/ratings` for the wire schema, `apps/web/src/lib/ratings.ts`
+for the SQL, `withUser()` for the route.
+
+**Rating genuinely needs an account.** Unlike the grocery list, there is no
+signed-out draft worth reconciling later — a cook log with nowhere to migrate
+it into is just data loss waiting to happen — so `/api/ratings` answers 401
+signed out and the UI swaps in "Sign in to log how it turned out." rather than
+a `localStorage` fallback.
+
+**Delete is scoped to the owner, not just the id.** `deleteCookLog(userId, id,
+recipeId)` deletes `where id = ... and user_id = ...`; a mismatched id is a
+silent no-op, same as one already gone. Covered live in
+`ratings.integration.test.ts` — Alice's delete request for Bob's log id leaves
+Bob's entry untouched.
+
+**The Chrome extension still didn't connect, but the in-app Browser pane did**,
+and drove the whole flow end-to-end: opened the Kalua Pork sheet signed out and
+confirmed the sign-in prompt; flipped `DEV_AUTH_FALLBACK` on locally only
+(reverted after, container recreated to confirm the 401 came back) to log a
+4-star "Quick / Would repeat" cook with a note; confirmed the entry, its date
+and its content render correctly; reloaded the page and confirmed the entry
+survived; removed it and confirmed the history section disappears cleanly.
+`cook_logs` is back to 0 rows.
+
+**Verification.** 601 tests passing (shared 104 — 9 new schema tests, db 20,
+worker 461, web 16 — 8 new integration tests against the real database: empty
+history, log-and-read-back, newest-first ordering that keeps two users apart, a
+rejected unknown-recipe id, ownership-scoped delete, and the aspect/rating
+vocab constraints still firing at the database and not just in Zod). Four
+typechecks clean, production build clean, `/api/ratings` and
+`/api/ratings/[id]` both registered as dynamic routes.
+
+**Still outstanding from Phase 5.** The grocery tab's print/copy/check-off
+round-trip is still only covered by tests, not a live browser click-through —
+skipped again this session at Peter's direction, not forgotten.
+
+### 2026-07-28 — the Phase 5 grocery tab, finally clicked through
+
+Closed the item that had been carried since Phase 5. Nothing was wrong; the
+value was in confirming it, and in one result the tests could not have given.
+
+**Signed out.** Saved three recipes (Cowboy Caviar, Kalua Pork, Shrimp and
+Pineapple Skewers), opened the Grocery list tab, and got a 35-item receipt
+across six aisle buckets — Produce, Meat & Seafood, Canned & Jarred, Pantry,
+Spices, Other — with merged quantities and fraction glyphs rendering correctly
+(`½ cup`, `2½ tsp`, `5 tbsp`). Ticking two items struck them through and moved
+the counter to "2 of 35 in the cart"; a reload brought both back.
+
+**Copy as text** put 1,077 characters on the real system clipboard (verified by
+reading it back, not just by trusting the button): the full receipt with `[x]`
+for ticked lines and `[ ]` for the rest, aisle headers intact.
+
+**Print was verified without opening the dialog** — a modal would have frozen
+the browser extension for the rest of the session. Instead the `@media print`
+block from `artifact.css` was applied to the live DOM as an ordinary stylesheet
+and screenshotted. Every selector in it resolves against real elements on that
+tab (`.mp-head`, `.mp-tabs`, `.mp-note`, `.mp-no-print`, `.mp-receipt`,
+`.mp-r-item`×35, `.mp-aisle`×6; `.mp-chips`/`.mp-pill`/`.mp-grid`/`.mp-scrim`
+are zero only because the browse tab is unmounted), and the result is the
+receipt alone — no masthead, tabs, toolbar or grid, ticks and strike-throughs
+preserved. That is the check worth keeping: a print rule fails silently by
+matching nothing.
+
+**Signed in — and this is the part tests could not prove.** With
+`DEV_AUTH_FALLBACK=true` set locally (reverted after; see below), first sign-in
+migrated the three picks and two check-offs into `dev@local`, and the grocery
+tab rendered **the identical 35-item list, with the two migrated check-offs
+landing on exactly the right lines**. Signed out that list is merged in
+TypeScript; signed in it is merged in SQL. So this is amendment A19's invariant
+— the raw-text slug, the case-sensitive unit lookup and the `unit:` fallback
+slug agreeing character for character across two languages — confirmed
+end-to-end against real data in a real browser, not just by the differential
+suite. Ticking a third item wrote `…:count:can` to `grocery_checks` (black
+beans, `1 can`), which also demonstrates the merge-within-a-unit-dimension rule
+picking the right key. Copying signed in produced 1,077 characters again —
+byte-identical in length, since `[x]` and `[ ]` are the same width.
+
+**Two notes worth keeping.**
+
+- `POST /api/ratings` answers **400, not 401, to a malformed body while signed
+  out**, because `parseBody()` runs before `withUser()` in the route. A
+  well-formed request signed out is a 401 as documented. Not a bug — the schema
+  is client-side code anyway — but HANDOFF's "signed out it is a 401" is only
+  true for well-formed requests, and this entry is where that nuance lives.
+- The browser-automation clicks failed silently for the first several attempts.
+  The cause was neither coordinates nor the app: clicks dispatched before React
+  finished hydrating 235 cards land on the DOM and do nothing. Wait for
+  hydration, or drive the element directly, before concluding a handler is
+  broken. (Separately, in this environment screenshots come back scaled 0.907×
+  from the 1280px viewport, so coordinates read off a screenshot are the right
+  ones to pass back.)
+
+**Cleanup.** `DEV_AUTH_FALLBACK` was appended to `.env` and removed again from
+a byte-identical backup; the web container was recreated both ways and
+`GET /api/planner` confirmed back to 401. All probe rows deleted — the database
+is again 2 users, 0 `saved_recipes`, 0 `grocery_checks`, 0 `cook_logs` — and the
+browser's `localStorage` planner keys were cleared.
+
+**Verification.** `corepack pnpm test` with `DATABASE_URL` — **604 passing**
+(shared 107, db 20, worker 461, web 16). The 601 recorded at the Phase 6 exit
+predates commit a18b63c, which added the three shared schema tests; 604 is the
+correct baseline from here.
+
+### 2026-07-28 — Phase 7 steps 1 and 4: hard rules, and making them visible
+
+Peter chose to build the deterministic half end to end before spending anything
+on the model, so this session is PLAN.md §5 step 1 plus the UI that step 1 is
+useless without. Steps 2 (soft profile) and 3 (batched scoring) are next and
+carry the OpenRouter cost.
+
+**Step 1, the derivation.** `apps/worker/src/personalization/hard-rules.ts`
+gathers evidence in SQL — nested time buckets, disjoint categories, overlapping
+tags via `unnest` in a lateral join — and hands it to
+`@recipes/shared/personalization`, which is pure and decides. Amendment A20
+records the design: why cost and cleanup aspects cannot be filters, why the
+median, why the time ladder emits its loosest triggering threshold, and why a
+switched-off rule stays off.
+
+**Step 4, the filter and the panel.** `hardRuleFilter()` builds the `WHERE`
+fragment and `listRecipes()` takes the rules as an argument rather than
+resolving them itself — that keeps `lib/recipes.ts` free of auth, and it forces
+the point that **both** callers must pass the same rules. The server-rendered
+page is the client's `initialData`, so a filter applied on one path and not the
+other is a hydration mismatch. `/api/recipes` resolves them from the session,
+never from the query string: a filter over your own feed must not be something
+a caller can turn off by editing a URL.
+
+`GET/PATCH /api/preferences/rules` answers with the whole rule list on every
+verb, the same "mutation returns full state" shape the planner and ratings
+routes use.
+
+**Verified live**, signed in through a temporary local `DEV_AUTH_FALLBACK=true`
+with two rules seeded by hand (`exclude_category:Soup`,
+`max_minutes:90`). Browse went from 235 recipes to **173**, Kalua Pork (3 hr)
+correctly disappeared, and the panel rendered both rules as sentences with their
+evidence lines and two switches. Flipping Soup off took the feed to **183** —
+the ten soup recipes returning — with the rule struck through and still listed,
+so it can be switched back on.
+
+**That live run found one real bug.** The first time, un-hiding those ten
+recipes surfaced them as an orange **"10 new recipes — show them"** pill. The
+pill logic was behaving exactly as specified (ids never shown before), but the
+sentence was wrong: they were not new, they were recipes we had been hiding.
+Fixed with `adoptNextFeed`, and written up in A20. Nothing but a browser would
+have caught this — every assertion involved was already passing.
+
+**Cleanup.** The seeded rules were deleted and `.env` restored byte-identical
+from backup; `GET /api/preferences/rules` is back to 401 and `/api/recipes`
+back to 235 unfiltered. Database is again 2 users, 0 `user_preferences`, 0
+`cook_logs`, 0 `saved_recipes`, 0 `grocery_checks`.
+
+**Verification.** 660 tests passing (shared 134, db 20, worker 473, web 33 —
+the 56 new ones are 27 pure, 12 worker integration and 17 web integration, all
+on scratch users that cascade away). Four typechecks clean, production build
+clean with `/api/preferences/rules` registered as a dynamic route, all four
+secrets absent from `apps/web/.next/static`.
+
+**Still to do in Phase 7.** Step 2 (LLM soft profile), step 3 (batched scoring
+into `recipe_scores` with a one-line reason), the score-aware browse ordering
+above the existing cold-start sort, and the `MIN_RATED_RECIPES_FOR_SCORING`
+guard — the constant exists and is unused until step 3. Peter's call on test
+data: seed synthetic `cook_logs` on a scratch user, drive both steps, then drop
+it.
+
+### 2026-07-28 (later) — Phase 7 steps 2 and 3: the model half, and the loop closes
+
+The half that costs money. Steps 1 and 4 shipped earlier the same day; this
+session is the soft profile, the batched scoring, the ordering that uses it,
+and the nightly job that finally runs all three. Amendment A21 records the
+design decisions; what follows is what was built and what the live run showed.
+
+**Step 2, the soft profile.** `apps/worker/src/llm/taste-profile.ts` is the
+prompt — one direct, stateless structured-output call, like every task since
+Phase 2 — and `apps/worker/src/personalization/profile.ts` is the SQL and the
+write. `loadCookHistory()` returns the 50 most recent cooks *plus* a count of
+distinct recipes rated over the whole history, because the display window must
+not be what answers the cold-start question. Below the floor the module makes
+**no provider call at all** and writes nothing.
+
+**Step 3, the scoring.** `score-recipes.ts` sends the profile and twenty
+recipes' browse-level facts, numbered `ref: 1…20`, and gets back
+`{ref, score, reason}`. `scoring.ts` loads the unscored rows newest-first,
+batches them, and upserts what `resolveScoreBatch()` can vouch for. Everything
+judgemental — the batch numbering, the ref resolution, the clamping, the
+cold-start predicate — lives in `@recipes/shared/personalization` and is tested
+without a database, the same split as A19 and A20.
+
+**The nightly chain.** Nothing scheduled `deriveHardRulesForUser()` before this
+session. Now `personalization-queue.ts` is a third pg-boss queue, and the
+enrichment job enqueues it on completion: scan → enrichment → personalization,
+in that order because scoring a recipe Phase 2 has not yet given a category,
+tags or a blurb would score it on a blank. Without an `OPENROUTER_API_KEY` the
+scan job enqueues it instead and the pass runs its free half only — rules must
+keep being re-derived nightly or a filter outlives the ratings behind it.
+`apps/worker/scripts/run-personalization.ts` (`personalize`) runs the same pass
+once, now, for one reader or all.
+
+**Verified live**, against the real provider. Twelve synthetic cook logs were
+seeded on `dev@local` — six recipes of 30 minutes or less at 5★ with
+`quick/tasty/would_repeat`, six over 90 minutes at 1★ with
+`slow/too_much_cleanup` — and `personalize --user` was run end to end:
+
+- **three hard rules** derived: `max_minutes:90`, `exclude_tag:Big batch`,
+  `exclude_tag:High protein` (the last two are what six slow recipes happen to
+  share; the derivation is only as good as its evidence, which is the point of
+  showing it);
+- **a profile** that reads exactly like PLAN.md's example — *"reliably dislikes
+  slow, messy projects … consistently love quick, 30-minute-or-less meals …"*;
+- **235 of 235 recipes scored** in 12 batches with no shortfall, 5 to 100, for
+  **$0.0093** total.
+
+Signed in through a temporary local `DEV_AUTH_FALLBACK=true`, browse showed
+**74** recipes (the rules) in strict score order from 100 down to 10, every card
+carrying its reason in a green aside under the blurb — "10 minutes and one pot,
+the ultimate quick weeknight winner." Signed out afterwards: 235 recipes, every
+`score` null, order unchanged.
+
+**One prompt line was relaxed after reading the output.** The profile prompt
+said "do not quote or restate individual recipes, ratings, or notes", and the
+model restated ratings anyway — accurately and readably. The ban on naming
+individual recipes it *did* follow. An instruction nobody follows is noise, so
+the line now forbids only what is actually enforced.
+
+**One flake, pre-existing, now fixed.** `corepack pnpm test` ran the workspace
+packages concurrently, and `apps/worker/test/recipes-storage.integration.test.ts`
+inserts a temporary **active** recipe while the web suites count active
+recipes — so the web suite failed with an off-by-one against a corpus that
+changed under it. It was always a race; the new suites shifted the timing
+enough to make it show. The root `test` script now passes
+`--workspace-concurrency=1`. The two new integration suites were also written
+to assert against what a call actually saw rather than against a second query.
+
+**Cleanup.** `.env` restored from a byte-identical backup, the web container
+recreated, `GET /api/planner` and `GET /api/preferences/rules` both back to
+401. All probe rows deleted: 0 `cook_logs`, 0 `user_preferences`, 0
+`recipe_scores`, 2 users. The `scan_runs` rows from the pass were kept — they
+record real spend and belong in the budget history.
+
+**Verification.** `corepack pnpm test` with `DATABASE_URL` — **712 passing**
+(shared 152, db 20, worker 500, web 40); four typechecks clean; production
+build clean; all four secrets absent from `apps/web/.next/static`;
+`/api/health` healthy with 425 recipes; `/`, `/ops`, `/api/recipes` all 200.
+OpenRouter spend to date ≈ **$0.32**.
+
+**Phase 7 is complete.** What is left is Phase 8's optional list, plus the
+pgvector similarity signal PLAN.md defers until there is enough history to
+justify it — the table is already there.

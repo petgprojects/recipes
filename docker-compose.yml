@@ -50,6 +50,11 @@ x-app: &app
     # because loopback is only allowed as `localhost` or `127.0.0.1`. The
     # authorize step succeeds first, so the failure only shows up at the very
     # last hop. Pinning the origin fixes it; `trustHost` alone does not.
+    #
+    # Derived from NEXT_PUBLIC_APP_URL rather than set independently, because the
+    # two must agree: one is where the browser reaches the app, the other is
+    # where Google is told to send it back. On a deployed server this is the
+    # public https origin — see PROGRESS.md amendment A22.
     AUTH_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
     # Phase 1 writes downscaled recipe images here; the volume is shared so web
     # can serve what worker downloaded.

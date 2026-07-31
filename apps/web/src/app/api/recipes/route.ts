@@ -29,6 +29,8 @@
 
 import { NextResponse } from 'next/server';
 import { RECIPE_STATUS } from '@recipes/shared';
+import { getCurrentUser } from '@/lib/current-user';
+import { getUserPreferences } from '@/lib/preferences';
 import {
   DEFAULT_RECIPE_LIMIT,
   MAX_RECIPE_LIMIT,
@@ -87,7 +89,14 @@ export async function GET(request: Request) {
   }
 
   try {
-    const rows = await listRecipes(options);
+    // Resolved here rather than taken from the query string: a hard rule is a
+    // filter over the reader's own feed, so it follows the session and must not
+    // be something a caller can spoof or turn off by editing a URL. The
+    // server-rendered page resolves them the same way — a difference between
+    // the two would be a hydration mismatch.
+    const userId = (await getCurrentUser())?.id ?? null;
+    const { rules } = await getUserPreferences(userId);
+    const rows = await listRecipes({ ...options, hardRules: rules, userId });
     return NextResponse.json(rows, { headers: { 'cache-control': 'no-store' } });
   } catch (error: unknown) {
     // Same reasoning as /api/health: do not answer 200 with an empty array when

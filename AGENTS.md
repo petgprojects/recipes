@@ -13,11 +13,32 @@ Do not restart completed phases or re-research facts already recorded there.
 
 ## Current checkpoint
 
-- Phase 0 through Phase 4 are complete.
-- Resume at **Phase 5: grocery list server-side** — port the aggregation in
-  `@recipes/shared/grocery.ts` to SQL over
-  `saved_recipes × recipe_ingredients × ingredients`. The per-user check-offs
-  already key on `grocery_checks.item_key`, so they need no migration.
+- **Phase 0 through Phase 7 are complete.** Nothing is half-finished; the next
+  move is Peter's choice from `HANDOFF.md`'s options table.
+- The Phase 7 loop runs nightly as scan → Phase 2 enrichment → personalization,
+  and per reader as hard rules (pure SQL, always) → soft profile → batched
+  scoring. Rules are a `WHERE` clause with a visible per-rule switch (A20);
+  scores order browse and carry a one-line reason onto the card (A21). Both
+  halves are gated on ≥5 *distinct rated recipes*. Run the pass by hand with
+  `apps/worker/scripts/run-personalization.ts` — it spends real money unless
+  given `--rules-only`.
+- Phase 6 (ratings) shipped `@recipes/shared/ratings`, `apps/web/src/lib/ratings.ts`,
+  `GET/POST /api/ratings` + `DELETE /api/ratings/:id`, and a "Rate it" section in
+  the detail sheet — star picker, aspect chips, notes, history, remove. Rating
+  requires an account (401 signed out, no `localStorage` draft) because unlike
+  the grocery list there is nothing sensible to migrate on a later sign-in.
+- The grocery tab's live browser check — carried since Phase 5 — is **done**
+  (2026-07-28). It confirmed what tests could not: the signed-out list merged in
+  TypeScript and the signed-in list merged in SQL render identically, including
+  which lines migrated check-offs land on.
+- The grocery list is merged in SQL (`apps/web/src/lib/grocery.ts`); unit choice
+  and fraction formatting stay in `@recipes/shared` and the two paths meet at
+  `finalizeGroceryBuckets()` (amendment A19). `apps/web/test/grocery-sql.integration.test.ts`
+  proves the two agree over the whole corpus — keep it and the shared spec both.
+- The Phase 2 semantic mapper now guards its `existing` claims
+  (`isPlausibleCanonicalMatch`, amendment A18) after an audit found 31 aliases
+  that had merged unrelated items — `ketchup` into `kalamata olives`. The guard
+  prefers a missed merge to a wrong one and will split some true synonyms.
 - Auth.js v5 + Google is live over the existing `users`/`accounts`/`sessions`
   tables. `AUTH_URL` must stay pinned in `docker-compose.yml`: the container
   binds `0.0.0.0`, and Google rejects a `0.0.0.0` `redirect_uri` at the
@@ -26,7 +47,8 @@ Do not restart completed phases or re-research facts already recorded there.
   `dev@local` fallback is opt-in via `DEV_AUTH_FALLBACK` (A15).
 - The verified Phase 2 exit has 425 recipes: 235 active, 190 rejected and zero
   pending, with zero duplicate source URLs.
-- Semantic enrichment mapped 4,456 of 4,617 ingredient rows. The remaining 161
+- Semantic enrichment mapped 4,456 of 4,617 ingredient rows across 789
+  canonical ingredients and 1,733 aliases. The remaining 161
   compound/alternative lines intentionally retain renderable `raw_text` and
   are a successful terminal condition, not retryable failures.
 - The planner UI at `/` is live: server-rendered browse, cached photos,
@@ -46,7 +68,10 @@ Do not restart completed phases or re-research facts already recorded there.
   image caching, persistence, pg-boss jobs and cron.
 - `packages/db` — Drizzle schema, migrations, seed and database client.
 - `packages/shared` — client-safe contracts, vocabularies, display formatting,
-  grocery aggregation, source configuration and validated environment handling.
+  grocery bucket finalization and plain-text rendering, source configuration and
+  validated environment handling.
+- `apps/web/test` — database-backed suites for the app's queries. Added in
+  Phase 5; needs `DATABASE_URL` like the worker's integration tests.
 - `apps/worker/test/fixtures` — real committed source HTML. Keep it; tests must
   not crawl the internet.
 - `PROGRESS.md` — durable implementation log and task checklist. Update it when
@@ -121,16 +146,109 @@ docker compose up -d web
 The volume is build output, so nothing is lost. Use `-p <other-project>` if a
 second instance is genuinely needed.
 
+## Moving the corpus to another machine
+
+The 425 recipes are not in the repository — they are in the `pgdata` volume, and
+their photos are in `recipe-images`. A fresh server therefore starts with 117
+seeded ingredients and **zero recipes**. Both halves have to travel, and they
+have to travel together: the database rows carry `image_local_path`, so a
+database restored without the images renders 425 cards with broken photos.
+
+Verified end to end on 2026-07-29 (amendment A22) — restored into a throwaway
+project, which then served all 425 recipes and a real cached photo over HTTP.
+
+**A dump is a credential.** `accounts` holds `access_token` and `id_token`
+columns for every linked Google account, and `sessions` holds live session
+tokens. Treat `recipes.dump` exactly like `.env`: never commit it, move it over
+`scp`, and delete it from both machines when the restore is confirmed.
+
+### 1. On the source machine
+
+Stop the worker first. `pg_dump` is internally consistent, but the images are a
+*separate* archive, and a crawl finishing between the two writes rows that
+reference files the tar never saw.
+
+```bash
+docker compose stop worker
+docker compose exec -T db pg_dump -U recipes -d recipes -Fc --no-owner --no-privileges > recipes.dump
+docker run --rm -v recipes_recipe-images:/src:ro -v "$PWD":/out alpine \
+  tar czf /out/recipe-images.tgz -C /src .
+docker compose start worker
+```
+
+Expect roughly 1.2 MB and 39 MB respectively at the Phase 7 corpus size. `-Fc`
+is the custom format — compressed, and restorable by `pg_restore`.
+
+### 2. On the target machine, before the first full `up`
+
+Bring up **only** the database, so `migrate` does not create a schema for the
+restore to collide with:
+
+```bash
+docker compose up -d db
+```
+
+Then wait for it properly. Do **not** gate on `pg_isready`: the postgres image's
+first-boot initialisation runs a *transient* server on the same socket before it
+creates `recipes` and restarts, so `pg_isready` reports ready while the database
+does not yet exist, and the restore fails with `database "recipes" does not
+exist`. Gate on a real query instead:
+
+```bash
+until docker compose exec -T db psql -U recipes -d recipes -c 'select 1' >/dev/null 2>&1; do sleep 1; done
+docker compose exec -T db pg_restore -U recipes -d recipes --no-owner --no-privileges < recipes.dump
+```
+
+The dump carries the schema, the four extensions (`vector`, `citext`, `pg_trgm`,
+`pgcrypto`) and `drizzle.__drizzle_migrations`, which is what makes the ordering
+work: the later `migrate` service finds all four migrations already recorded and
+the seed's upserts find nothing new, so a normal `up` is an idempotent no-op over
+restored data rather than a conflict.
+
+### 3. The images, and the ownership trap
+
+```bash
+docker run --rm -v recipes_recipe-images:/dst -v "$PWD":/in:ro alpine \
+  tar xzf /in/recipe-images.tgz -C /dst
+docker run --rm -v recipes_recipe-images:/dst alpine chown -R 1000:1000 /dst
+```
+
+The `chown` is required, not defensive. The archive's `./` entry resets the
+directory to `root:root` on extraction, and the production images run `USER node`
+(uid 1000) — so without it the worker cannot write the next photo it downloads,
+having crawled the page successfully first. 1000 is `node`'s uid in
+`node:24-bookworm-slim`; the dev images run as root and would not have noticed.
+
+### 4. Then the rest, and check it
+
+```bash
+docker compose up -d
+curl -s localhost:${WEB_PORT:-3000}/api/health
+```
+
+`/api/health` must report the source machine's counts — `"recipes":425` and
+`"ingredients":789`, not the seed's 117. Then fetch one photo by its
+`image_local_path` through `/api/images/:file` and expect a `200` with
+`image/webp`; that is the check that proves both halves arrived, and it is the
+one a database-only restore fails.
+
+Two things a restore deliberately carries over: `users` and `accounts`, so the
+same Google account links to the same user row and its ratings and saved recipes
+survive the move. `sessions` rows come too and are harmless — their cookies were
+issued for the old origin and will never be sent to the new one.
+
 ## Verification baseline
 
-At the Phase 4 checkpoint:
+At the Phase 7 checkpoint:
 
-- `corepack pnpm test` (with `DATABASE_URL`) — 564 passing (shared 85, db 20,
-  worker 459).
+- `corepack pnpm test` (with `DATABASE_URL`) — 712 passing (shared 152, db 20,
+  worker 500, web 40). The root script runs packages one at a time on purpose;
+  see `HANDOFF.md`.
 - `corepack pnpm typecheck` — clean across all workspaces.
 - Production Next.js build — passing.
 - `/api/health` — healthy with 425 recipes.
-- `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file` — HTTP 200.
+- `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file` — HTTP 200,
+  and `POST /api/grocery` — HTTP 200.
 
 For a change, run the focused test first, then the full relevant suite. Verify
 database, queue, crawl or UI exit criteria directly rather than relying only on

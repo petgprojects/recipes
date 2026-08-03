@@ -3,10 +3,10 @@ import { eq } from '@recipes/db/operators';
 import { recipes, scanRuns, sources } from '@recipes/db/schema';
 import { PgBoss } from 'pg-boss';
 import type { Database } from '@recipes/db/client';
+import { recordLlmUsage } from '@recipes/db/llm-budget';
 import { ensureScanQueue, SCAN_QUEUE_OPTIONS } from '../src/jobs/queue';
 import { withScanAdvisoryLock } from '../src/jobs/advisory-lock';
 import { createPostgresScanOrchestrator } from '../src/scan/postgres';
-import { recordLlmUsage } from '../src/enrichment/postgres';
 import { PoliteFetcher } from '../src/scanner/fetcher';
 import type { RecipeDraft } from '../src/scanner/jsonld';
 import type { ScannableSource } from '../src/scan/orchestrator';
@@ -289,7 +289,7 @@ integration('Phase 1 queue, lock and telemetry', () => {
       discoveryLimit: 10,
       now: advancingClock(),
       async htmlFallback(input) {
-        await recordLlmUsage(db, input.runId, {
+        await recordLlmUsage(db, input.runId, 'scan', {
           tokensIn: 654,
           tokensOut: 32,
           costUsd: 0.000789,

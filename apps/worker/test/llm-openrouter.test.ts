@@ -2,15 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ChatCompletion } from 'openai/resources/chat/completions';
 import { z } from 'zod';
 import {
+  DEEPSEEK_V4_FLASH_PRICING,
   StructuredOutputError,
   createStructuredOutputClient,
+  normalizeOpenRouterUsage,
   type ChatCompletionTransport,
   type StructuredOutputTask,
-} from '../src/llm/openrouter';
-import {
-  DEEPSEEK_V4_FLASH_PRICING,
-  normalizeOpenRouterUsage,
-} from '../src/llm/usage';
+} from '@recipes/shared/llm';
 
 const TEST_SCHEMA = z.object({
   ok: z.boolean(),

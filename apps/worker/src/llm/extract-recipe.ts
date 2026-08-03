@@ -14,7 +14,7 @@ import type {
 import type {
   StructuredOutputCallOptions,
   StructuredOutputClient,
-} from './openrouter';
+} from '@recipes/shared/llm';
 
 const MAX_PAGE_TEXT_CHARS = 100_000;
 

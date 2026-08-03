@@ -18,7 +18,7 @@ import type {
   StructuredOutputCallOptions,
   StructuredOutputClient,
   StructuredOutputTask,
-} from '../src/llm/openrouter';
+} from '@recipes/shared/llm';
 
 const databaseUrl = process.env.DATABASE_URL;
 const integration = describe.skipIf(databaseUrl === undefined);

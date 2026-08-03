@@ -161,3 +161,19 @@ export type SourceKind = (typeof SOURCE_KIND)[number];
 /** Lifecycle of a row in `scan_runs`. Not in PLAN.md §4; see the report. */
 export const SCAN_RUN_STATUS = ['running', 'success', 'partial', 'error'] as const;
 export type ScanRunStatus = (typeof SCAN_RUN_STATUS)[number];
+
+/**
+ * What a `scan_runs` row is accounting for (FILTER_PLAN.md §6).
+ *
+ * A separate discriminator and **not** a reuse of `source_id is null`, which
+ * already means "a run spanning every source" and is what the nightly scan
+ * writes. Without this column search spend and enrichment spend are the same
+ * number, and FILTER_PLAN.md §8's separate `SEARCH_DAILY_BUDGET_USD` is
+ * unimplementable: one heavy enrichment night would silently kill the search
+ * bar for the whole following day and give no clue why.
+ */
+export const SCAN_RUN_KIND = ['scan', 'search'] as const;
+export type ScanRunKind = (typeof SCAN_RUN_KIND)[number];
+
+/** The kind every pre-existing row has, and the column default. */
+export const DEFAULT_SCAN_RUN_KIND = 'scan' satisfies ScanRunKind;

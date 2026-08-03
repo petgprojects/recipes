@@ -2,7 +2,8 @@
 
 Turning `meal-prep-planner.jsx` (a static 24-recipe artifact) into a live, self-hosted service.
 
-Source requirements: [`reqs.md`](./reqs.md). Current draft: [`meal-prep-planner.jsx`](./meal-prep-planner.jsx).
+Source requirements: [`reqs.md`](../reqs.md). The original `meal-prep-planner.jsx`
+draft was retired in Phase 3 and is no longer in the repository.
 
 ---
 

@@ -11,7 +11,7 @@ import {
 import type {
   StructuredOutputCallOptions,
   StructuredOutputClient,
-} from './openrouter';
+} from '@recipes/shared/llm';
 
 const CATEGORY_VOCABULARY = JSON.stringify(CATEGORIES);
 const TAG_VOCABULARY = JSON.stringify(TAGS);

@@ -40,13 +40,16 @@ import {
 import {
   AISLES,
   CATEGORIES,
+  DEFAULT_SCAN_RUN_KIND,
   FALLBACK_AISLE,
   RATING_ASPECTS,
   RECIPE_STATUS,
+  SCAN_RUN_KIND,
   SCAN_RUN_STATUS,
   SOURCE_KIND,
   TAGS,
   type InstructionStep,
+  type ScanRunKind,
 } from '@recipes/shared';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -177,6 +180,17 @@ export const recipes = pgTable(
     index('recipes_slug_idx').on(t.slug),
     // `?since=<ts>` polling in Phase 3.
     index('recipes_last_seen_at_idx').on(t.lastSeenAt.desc()),
+    // FILTER_PLAN.md §5's two search indexes. Different tools: FTS is word and
+    // stem matching over our own prose, which is what finds "spicy" in a blurb;
+    // trigram is fuzzy spelling, for a typo in the raw query. The FTS
+    // expression is duplicated in `ftsDocument()` in apps/web/src/lib/search.ts
+    // and the two must match character for character, or the compiled query
+    // sequential-scans instead of using this index.
+    index('recipes_search_fts_idx').using(
+      'gin',
+      sql`to_tsvector('english', ${t.title} || ' ' || coalesce(${t.blurb}, ''))`,
+    ),
+    index('recipes_title_trgm_idx').using('gin', sql`${t.title} gin_trgm_ops`),
     check('recipes_tags_vocab', sql.raw(`"tags" <@ ${textArrayLiteral(TAGS)}`)),
     check('recipes_source_rating_range', sql`${t.sourceRating} is null or (${t.sourceRating} >= 0 and ${t.sourceRating} <= 5)`),
     // A rejected row must explain the gate decision; pending/active rows must
@@ -439,6 +453,17 @@ export const scanRuns = pgTable(
       onDelete: 'set null',
       onUpdate: 'cascade',
     }),
+    /**
+     * What this row accounts for (FILTER_PLAN.md §6). Text with a CHECK rather
+     * than a pgEnum, exactly as `recipes.tags` is, and generated from the same
+     * shared constant.
+     *
+     * It exists because `source_id is null` is already spoken for — it means "a
+     * run spanning every source" — so it cannot double as the discriminator
+     * between a nightly scan and the day's search accumulator. Without this
+     * column the two budgets are one number.
+     */
+    kind: text('kind').notNull().default(DEFAULT_SCAN_RUN_KIND).$type<ScanRunKind>(),
     startedAt: tstz('started_at').notNull().defaultNow(),
     finishedAt: tstz('finished_at'),
     status: scanRunStatusEnum('status').notNull().default('running'),
@@ -449,7 +474,7 @@ export const scanRuns = pgTable(
     newCount: integer('new').notNull().default(0),
     tokensIn: integer('tokens_in').notNull().default(0),
     tokensOut: integer('tokens_out').notNull().default(0),
-    /** Feeds the daily budget cap in `LLM_DAILY_BUDGET_USD`. */
+    /** Feeds the kind-specific enrichment and search daily budget caps. */
     costUsd: numeric('cost_usd', { precision: 12, scale: 6, mode: 'number' })
       .notNull()
       .default(0),
@@ -458,6 +483,7 @@ export const scanRuns = pgTable(
   (t) => [
     index('scan_runs_started_at_idx').on(t.startedAt.desc()),
     index('scan_runs_source_id_idx').on(t.sourceId),
+    check('scan_runs_kind_vocab', sql.raw(`"kind" = ANY (${textArrayLiteral(SCAN_RUN_KIND)})`)),
   ],
 );
 

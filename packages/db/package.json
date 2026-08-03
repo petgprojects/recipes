@@ -8,6 +8,7 @@
     "./schema": "./src/schema.ts",
     "./operators": "./src/operators.ts",
     "./client": "./src/client.ts",
+    "./llm-budget": "./src/llm-budget.ts",
     "./migrate": "./src/migrate.ts",
     "./seed": "./src/seed.ts"
   },

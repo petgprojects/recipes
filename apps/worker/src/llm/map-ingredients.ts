@@ -10,7 +10,7 @@ import { z } from 'zod';
 import type {
   StructuredOutputCallOptions,
   StructuredOutputClient,
-} from './openrouter';
+} from '@recipes/shared/llm';
 
 const MAX_UNKNOWN_NAMES = 40;
 // The vocabulary is database-owned rather than arbitrary request input. Keep

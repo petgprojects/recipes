@@ -1,13 +1,14 @@
 # Session Handoff
 
-Current state and the next move. Written 2026-07-28, after Phase 7 closed —
-the personalization loop runs end to end and was verified live against the real
-provider.
+Current state and the next move. Updated 2026-07-31, after natural-language
+search **Phase 6** closed — the plan is complete end to end, and then one more
+phase the plan never contained, because the first real search a human ran
+against the shipped feature returned one recipe where the corpus had five.
 
 This file is **not** a history — it holds only what still constrains the code.
-`PROGRESS.md` is the archive: every amendment (A1–A22), why each decision was
-made, and a log entry per phase. Read that when you need the reasoning behind a
-rule here, or before reopening a settled decision. `AGENTS.md` has the
+`progress/PLAN.md` is the archive: every amendment (A1–A22), why each decision
+was made, and a log entry per phase. Read that when you need the reasoning behind
+a rule here, or before reopening a settled decision. `AGENTS.md` has the
 repository map, commands and working rules.
 
 ---
@@ -15,7 +16,71 @@ repository map, commands and working rules.
 ## Start here
 
 **Phases 0 through 7 are complete.** There is no half-finished work and nothing
-carried over. The next move is a decision rather than a task, and it is Peter's:
+carried over.
+
+**The next move has been chosen: natural-language search.** The design is settled
+in [`plans/FILTER_PLAN.md`](./plans/FILTER_PLAN.md) and the log is
+[`progress/FILTER_PLAN.md`](./progress/FILTER_PLAN.md), amendments from A23.
+
+**All six of its phases are complete** — 1 through 4 on 2026-07-30, Phase 5 on
+2026-07-31, and Phase 6 the same day, on branch `filters`. Phase 6 is not in
+`plans/FILTER_PLAN.md`: it is `anyIngredients`, and it exists because the
+feature was used.
+
+Phase 1 moved the OpenRouter transport into `packages/shared/src/llm/` behind
+the server-only `@recipes/shared/llm` subpath, as 100%-similarity renames with
+no assertion changed. The plan says "17 importing modules" in two places and the
+real number was 12 — the worker's `src/llm/index.ts` barrel absorbed the rest.
+
+Phase 2 added the `SearchFilter` contract (`packages/shared/src/search.ts`,
+client-safe and in the barrel), the compiler (`apps/web/src/lib/search.ts` —
+`WHERE`, `match_count`, the relaxation ladder and `searchRecipes()`), and
+migration `0004_search.sql`. **Its exit criterion is met**: the hand-authored
+filter for the plan's example query returns exactly the 12 recipes §1 names,
+through the compiler, verified against the live corpus and by dumping the
+compiler's emitted SQL and comparing it to §1's hand-written query. The suite
+went 712 → **762**; nothing existing changed. No LLM is involved anywhere in it.
+
+Phase 3 added `apps/worker/src/llm/parse-search-query.ts` — the prompt, the
+strict schema and three deterministic repairs — plus committed fixture pairs
+and the opt-in `scripts/check-search-parse.ts`. The original 30-case exit
+criterion remains met (28–29 of 30 live agreements); it now has a corpus-shaped
+1,000-case stress matrix layered over those anchors. All 1,000 pass offline.
+The one-off live stress run on 2026-07-30 agreed on **932 of 1,000 (93.2%)**,
+above the 90% gate, with zero time-tag repairs, at an estimated **$0.27187**.
+The whole pipeline still works end to end: the §1 example query, parsed by the
+*live* model, returns a filter byte-identical to the hand-authored one, and that
+filter compiles to exactly the 12 recipes §1 names, with zero relaxations.
+The suite grew by the stress cases; the current full count is recorded below.
+
+Phase 4 moved the one durable lease/accounting implementation out of the worker
+and into the server-only `@recipes/db/llm-budget` subpath. Both budget reads and
+writes require a `scan_runs.kind`; scan keeps advisory key 2 and search uses key
+3, so the independent pots do not block or leak into each other. The
+day-rolling search accumulator is `success` from creation, `/ops` labels it
+**Search**, and `SEARCH_DAILY_BUDGET_USD` defaults to `$0.10` — about 175
+measured production-shaped searches, not thousands. The suite went 827 →
+**836**.
+
+Phase 5 shipped `GET /api/search` (401 / 400 / 503 / 200), the orchestration in
+`apps/web/src/lib/search-service.ts`, the notice contract in
+`@recipes/shared/search`, the signed-in search bar and `?q=` URL state. The
+example query returns the same 12 recipes through the running app; the URL is
+shareable, one back press restores a previous query, and all four notices plus
+the disabled state were seen in a browser. The full account is in the progress
+log's Phase 5 section — read that before changing any of it.
+
+Phase 6 added **`anyIngredients`**, and it is the one phase that came from use
+rather than from design. "anything with turkey in it" returned one recipe; the
+corpus has five, spread across four canonical names. `ingredients` is a
+conjunction, so the parse step could name one name (a fifth of the answer) or
+reach for `Beef & Turkey` (29 rows, two of them turkey) — and nothing told the
+reader either way. §3.1 makes exactly this any-versus-all argument for tags and
+never made it for ingredients. Amendment **A39**, with a fourth deterministic
+repair and a cheap `--anchors` mode on the check script.
+
+**There is no next phase in this plan.** The options below are open and
+unstarted:
 
 | Option | What it is |
 | --- | --- |
@@ -61,6 +126,22 @@ cron (0 3 * * *) → scan job → [enrichment job] → personalization job
 docker compose exec worker ./node_modules/.bin/tsx scripts/run-personalization.ts --user <uuid>
 docker compose exec worker ./node_modules/.bin/tsx scripts/run-personalization.ts --rules-only
 ```
+
+The other script that spends money is the Phase 3 parse check — opt-in, never
+part of `pnpm test`. The committed suite has 1,000 cases; the live script uses
+the Phase 5 90% gate and prints field-level drift summaries:
+
+```bash
+docker compose exec worker ./node_modules/.bin/tsx scripts/check-search-parse.ts --anchors
+docker compose exec worker ./node_modules/.bin/tsx scripts/check-search-parse.ts
+docker compose exec worker ./node_modules/.bin/tsx scripts/check-search-parse.ts --live-vocabulary
+```
+
+**Reach for `--anchors` first.** It is the thirty hand-authored fixtures plus
+every food-family case — 66 calls, about **$0.02**, under a minute — against the
+full matrix's **$0.27**. Run it after any edit to the prompt's INGREDIENTS or
+CATEGORIES sections; it is what caught both Phase 6 regressions, and the full
+matrix is a decision rather than a step.
 
 It spends real money without `--rules-only`. A full 235-recipe scoring pass for
 one reader is 12 provider calls and cost **$0.0093** measured; budget several
@@ -109,16 +190,29 @@ off a screenshot are the correct ones to pass back.
   `saved_recipes`, **0** `grocery_checks`, **0** `cook_logs`, **0**
   `user_preferences`, **0** `recipe_scores` — every probe row from Phases 4
   through 7 was removed.
-- OpenRouter spend to date ≈ **$0.32**.
+- **1 `kind='search'` scan row**, for 2026-07-31, at **$0.008567**. That is the
+  Phase 5 and Phase 6 browser checks' real spend, and it is the UTC day's
+  accumulator — left in place deliberately, because it records money that was
+  actually spent and is what the daily budget reads.
+- OpenRouter spend to date ≈ **$0.82** — the prior ≈ $0.70, plus ≈ $0.008 of
+  Phase 5 searches and ≈ $0.11 of Phase 6 (three `--anchors` runs and a dozen
+  single-query probes; the $0.27 full matrix was deliberately not re-run). The 1,000-case stress run used
+  `SEARCH_DAILY_BUDGET_USD=5` only on its `docker compose exec` process; the
+  repository default and `.env` remain unchanged.
+- A search costs **$0.00057–0.00064** measured through the real route, which is
+  exactly Phase 3's estimate — about **160–175 searches per UTC day** at the
+  `$0.10` default.
 
-Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **712
-passing** (shared 152, db 20, worker 500, web 40); four typechecks clean;
-production build clean; all four secrets absent from `apps/web/.next/static`;
-`/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file`,
-`POST /api/grocery`, `GET/POST /api/ratings`, `DELETE /api/ratings/:id` and
-`GET/PATCH /api/preferences/rules` all respond correctly with the Compose stack
-up. Signed out, `/api/recipes` returns all 235 active recipes with every `score`
-null, and `/api/preferences/rules` is a 401.
+Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **1,849
+passing** (shared 181, db 20, worker 1,551, web 97); all four typechecks clean;
+production build clean; all four secrets absent from `apps/web/.next/static`,
+and so are `OpenAI`, `openrouter.ai`, `createOpenRouterClient` and
+`StructuredOutputError`; `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`,
+`/api/images/:file`, `POST /api/grocery`, `GET/POST /api/ratings`,
+`DELETE /api/ratings/:id`, `GET/PATCH /api/preferences/rules` and
+`GET /api/search` all respond correctly with the Compose stack up. Signed out,
+`/api/recipes` returns all 235 active recipes with every `score` null, and both
+`/api/preferences/rules` and `/api/search?q=…` are 401.
 
 The production build needs `DATABASE_URL` in its environment — `/api/health`
 imports `@recipes/shared/env` at module scope, so `next build` fails at "collect
@@ -126,15 +220,203 @@ page data" without it. That is pre-existing and not a regression.
 
 Driven live in a browser, signed in through a temporary local
 `DEV_AUTH_FALLBACK=true` (reverted after; recipe above): the Phase 6 ratings
-flow, the Phase 5 grocery tab both signed in and signed out, the Phase 7 rules
-panel, and the full Phase 7 loop — three derived rules took browse from 235 to
-74, in strict score order from 100 down to 10, every card carrying its reason.
+flow, the `PLAN.md` Phase 5 grocery tab both signed in and signed out, the Phase
+7 rules panel, and the full Phase 7 loop — three derived rules took browse from
+235 to 74, in strict score order from 100 down to 10, every card carrying its
+reason.
+
+And, on 2026-07-31, `FILTER_PLAN.md` Phase 6: "anything with turkey in it"
+returning **5 recipes** through `anyIngredients` where it had returned one, and
+"meals with mushrooms" returning 6 through both mushroom canonicals.
+
+And, the same day, all of `FILTER_PLAN.md` Phase 5: the example query returning
+its 12 recipes from a typed sentence, a shareable `?q=` URL, one back press
+restoring a previous query with its results and notices, chips narrowing within
+results (91 → 25) and resetting to *All* on a new search, all four notices on
+screen, and the bar rendered disabled-with-an-explanation at the 90% gate while
+browse carried on working.
 
 ---
 
 ## Invariants — these will bite you
 
 Each one has a plausible-looking wrong version, and most fail silently.
+
+### Search (FILTER_PLAN Phases 2–6, A27, A28, A32, A33, A35–A39)
+
+- **Time compiles to `total_minutes`, never to the `Under 20 min` tag.** 12
+  recipes carry the tag; 34 satisfy the column. Trusting the tag silently loses
+  two thirds of the matches and returns twelve plausible recipes while doing it.
+  The tag vocabulary is for concepts with no column; where a column exists, the
+  column wins.
+- **The null convention is inverted from `hardRuleFilter()`, on purpose.** A
+  requirement is not satisfied by unknown data — "under 20 minutes" drops the
+  recipe with no time, and "freezes well" drops the 144 with no
+  `freezer_months`. An exclusion does not fire on unknown data. A hard rule was
+  *inferred* from ratings and deserves the benefit of the doubt; a search was
+  *typed*, and a null is not a yes. Both directions are pinned by tests, because
+  both wrong versions return a believable number of rows.
+- **Ingredient constraints and every `exclude*` field are never relaxed.**
+  They appear nowhere in `RELAXATION_LADDER` and must stay out of it. Returning
+  mushroom recipes to someone who said "no mushrooms" because nothing else
+  matched is worse than returning nothing. **`anyIngredients` is off the ladder
+  too**, even though `anyTags` is rung 2 — `anyTags` is fuzzy by construction,
+  so relaxing it drops an interpretation, while `anyIngredients` is a
+  disjunction only because the corpus files one food under several names. The
+  cook said turkey and meant turkey.
+- **A food is a disjunction; a specific item is a conjunction** (A39). The
+  corpus splits one food across canonical rows, so "turkey" is four names on
+  five recipes: `ingredients` with all four is **zero** recipes, `ingredients`
+  with one is **one**, and `categories: ['Beef & Turkey']` is 29 of which two
+  contain turkey. Only `anyIngredients` asks the question that was asked. This
+  is the same argument §3.1 makes for `anyTags`, which the plan simply never
+  made for ingredients.
+- **`Beef & Turkey` behaves differently for its two foods, and the prompt says
+  so with numbers.** Roughly 10 of its 29 recipes carry a beef canonical, so the
+  category has *better* recall for beef than the ingredient rows do and beef
+  uses it in both directions. Two contain turkey while five turkey recipes exist
+  corpus-wide, so turkey uses it in neither — asking gets a page of beef, and
+  excluding throws away beef nobody objected to. The model cannot see these
+  counts; deriving the rule instead of stating it produced the bug.
+- **A name can never be in an include field and `excludeIngredients` at once.**
+  `dropContradictoryIngredients()` guarantees it and the exclusion wins. The
+  first live run after A39 answered "no chicken" with the same ten names in
+  `anyIngredients` *and* `excludeIngredients` — "contains chicken and contains
+  no chicken", an empty page for the most ordinary exclusion there is.
+- **A refused food must never reach `categories`.** The obvious fix for the
+  above regressed "no chicken" into `categories: ['Chicken']`, which is a page
+  of exactly what was refused. The prompt now leads with direction rather than
+  with the food.
+- **Ingredients match `ingredients.name` exactly, in both directions** — never
+  the trigram or alias path `recipe_ingredients` uses. Canonical `chicken` is on
+  2 recipes and `chicken broth` on 22; a fuzzy include answers the wrong
+  question and a fuzzy exclude hides recipes with no way to find out.
+- **`match_count` is computed from the *un-relaxed* filter while `where` uses
+  the relaxed one.** That mismatch is the feature: once a criterion is dropped
+  the `WHERE` can no longer rank the rows that met it, and ranking them first is
+  the only reason §4.3 sorts on the column.
+- **A bare integer in an `ORDER BY` is a positional reference.** An empty filter
+  compiled `order by 0 desc` and the query failed outright. It is `0::int`.
+- **`ftsDocument()` must stay character-for-character identical to
+  `recipes_search_fts_idx`.** Change the coalesce, the separator or the
+  regconfig and the query still returns the right rows — by sequential scan.
+  `search.integration.test.ts` EXPLAINs the compiler's own clause inside a
+  transaction with `enable_seqscan` off and asserts the index name appears.
+- **Search does not apply hard rules (§4.2), and cannot.** `searchRecipes()`
+  takes no `hardRules` option, so there is none to forget to pass. Scores are
+  *not* overridden — they stay as the tiebreak.
+- **`scan_runs.kind` is not decoration.** `source_id is null` already means "a
+  run spanning every source"; do not reuse that null as the search
+  discriminator, or Phase 4's separate budget cannot be built.
+- **There is one budget implementation: `@recipes/db/llm-budget`.** Shared
+  cannot own DB-backed accounting because DB already depends on shared, and web
+  cannot import worker. Do not restore a worker-local copy or add a web-local
+  lease; two implementations are two budgets.
+- **Every budget read and write names its kind.** `getDailyLlmUsage()` filters
+  by both UTC day and kind, and `recordLlmUsage()` rejects a mismatched row.
+  The `/ops` UTC-day tile is the deliberate exception: it is total spend and
+  continues summing both kinds.
+- **The advisory keys are separate on purpose:** scan is `2`, search is `3`.
+  The pots are independent, so making a user search wait behind an enrichment
+  preflight protects nothing. Search accumulator creation shares key `3`, which
+  is what makes one row per UTC day safe without another migration.
+- **A search accumulator is never `running`.** It is `success` with a non-null
+  `finished_at` from creation and advances the timestamp per search, or `/ops`
+  reads the all-day accumulator as a stuck scan. `hasCompletedScan()` must keep
+  filtering `kind='scan'`, or that successful row suppresses fresh-DB bootstrap.
+- **The paid parse diagnostic is outside the search pot.**
+  `scripts/check-search-parse.ts` opens no `scan_runs` row by design; routing it
+  through the budget would let a diagnostic consume the next day's search
+  allowance. Its `--anchors` mode is the one to run routinely: 66 calls and
+  ~$0.02 against the full matrix's ~$0.27, and it is what caught both of
+  Phase 6's regressions.
+- **A test that writes to a durable accumulator must restore what it found.**
+  The Phase 5 budget-gate test reset `scan_runs.cost_usd` to `0` in its
+  `finally`, and that row is the *shared* daily search accumulator — one
+  `pnpm test` erased a day of real spend. It snapshots and restores now. The
+  tokens left on the row are what made it visible: 49,616 tokens at $0.00.
+- **The parse prompt lives in `@recipes/shared/llm`, not the worker** (A35).
+  It is the only task prompt that does, because its only caller is the web
+  route and `apps/web` must not import `@recipes/worker`. It inherits the
+  subpath's rule — server-only, absent from the package barrel — and the
+  worker's `src/llm` barrel re-exports it, so anything addressing it through
+  that barrel already works. Do not move it back.
+- **The bundle-leak grep is no longer free.** `apps/web` now has a real LLM
+  caller, so a production build plus a grep of `apps/web/.next/static` for
+  `OpenAI`, `openrouter.ai`, `createOpenRouterClient` and
+  `StructuredOutputError` is a check to actually run, not a formality. It was
+  clean at the Phase 5 exit over 35 files.
+- **The search is never run server-side.** `page.tsx` reads `?q=` and passes the
+  string down; the client runs it once and caches it forever. A search is a
+  billable call, and a crawler, a link preview or a reload each paying for one
+  is not something to find out about from a bill.
+- **`?q=` is written with `pushState`, and the push is outside the state
+  updater** (A37). React calls a `setState` updater more than once — twice under
+  StrictMode in development — so a `pushState` inside one pushed two identical
+  history entries and leaving a query took two back presses. `router.push` was
+  rejected separately: the page is `force-dynamic`, so it would re-run the whole
+  server render to change a string the component already holds.
+- **A notice the reader is not shown is worse than an empty state.** All four —
+  §4.2's bypassed rules, §4.4's relaxations, §5.1's union and A26's degraded
+  parse — are assembled by one pure `searchNoticesFor()` in
+  `@recipes/shared/search`, because the assembly step is where one gets
+  silently dropped. Add a fifth there, with a fixture, not in the route.
+- **A26's text fallback must drop English stopwords, and asks Postgres which
+  they are** (A38). `plainto_tsquery('english','with')` is the *empty* query and
+  `@@` against it is false, so one surviving "with" makes the whole conjunction
+  unsatisfiable however good the other terms are. `numnode(...) > 0` is the
+  filter. Do not reimplement the stopword list in TypeScript.
+- **A route module may only export handlers and Next's own config fields.**
+  `next build` type-checks this and fails on anything else — an exported message
+  constant is enough to break the build while `tsc` stays clean.
+- **`scan_runs.cost_usd` is `numeric(12,6)`.** A JS product like `0.1 × 0.9`
+  rounds on the way in and reads back below the number it was written as, so the
+  90% gate cannot be tested exactly on its boundary. Real spend arrives in
+  ~$0.00057 steps and crosses it within one search either way.
+- **`SEARCH_VOCAB_VERSION` is meant to break the build** (A25, A27). It is
+  derived from `CATEGORIES` and `TAGS` and pinned literally in **three** places:
+  `packages/shared/test/search.test.ts`,
+  `apps/worker/test/fixtures/search-queries.ts` and
+  `apps/worker/test/llm-parse-search-query.test.ts`. When it goes red, go and
+  look at whether the fixtures still say what they meant, *then* paste the new
+  value in. Not the other way round. **The leading number is the shape of
+  `SearchFilter` and is bumped by hand** — it went to `2-` when
+  `anyIngredients` was added, because the vocabularies had not moved and the
+  derived suffix therefore could not tell a fourteen-field filter from a
+  fifteen-field one.
+
+### The parse step (FILTER_PLAN Phase 3, A29–A31)
+
+- **The prompt carries the vocabularies, not just the schema.** The strict
+  `json_schema` enum stops the model returning a tag that does not exist; it
+  does not tell it that `Cheap` and `Slow cooker` *exist*. Deleting those two
+  interpolated lines from `PARSE_SEARCH_QUERY_SYSTEM_PROMPT` measurably halves
+  the parse quality — that is where 16 of 30 came from, before they were added.
+- **The model cannot name a canonical ingredient it has not been shown.**
+  `parseSearchQuery()` takes the vocabulary as an input, and Phase 5 must pass
+  the ~554 names on active recipes. Pass `[]` and the two ingredient fields come
+  back empty — silently, and correctly, because an invented name matches no row.
+- **Do not "simplify away" the three repairs.** `repairTimeTags()`,
+  `foldSingletonAnyTags()` and `dropEmptyTerms()` each guarantee something the
+  prompt merely asks for. The middle one matters even though it cannot change a
+  result: `@>` and `&&` over one element are the same predicate, but
+  `RELAXATION_LADDER` drops `anyTags` two rungs before `tags`, so without it the
+  same query relaxes differently depending on the sampling.
+- **`repairTimeTags()` reporting non-empty is the alarm worth watching.** It has
+  never fired against the live model. When it does, the §1 time trap is being
+  attempted and the prompt is losing that argument.
+- **The contract's dedupe must stay `.overwrite()`, never `.transform()`.** A
+  Zod transform is unrepresentable in JSON Schema and `z.toJSONSchema()` throws
+  on one — which is what the transport calls. It fails at the provider boundary,
+  not at a type boundary, so nothing catches it until a real search is run.
+- **`scripts/check-search-parse.ts` spends money and is not a test.**
+  `vitest.config.ts` includes `test/**/*.test.ts` only, which is the one thing
+  keeping it out of `pnpm test`. Do not widen that glob.
+- **Prompt tuning past ~28 of 30 is fitting to noise.** At `temperature: 0` the
+  failing *set* rotates run to run while the count sits at 28 ± 1. One edit — an
+  "ORDER OF WORK" numbered checklist — made the model honour an injected
+  `freezerOnly: true` in two runs of three. If you add procedural framing to
+  this prompt, re-run the injection fixture before believing it helped.
 
 ### Personalization, the model half (A21)
 
@@ -358,6 +640,18 @@ Each one has a plausible-looking wrong version, and most fail silently.
   nothing in `src/components` may. Client-facing types live in
   `src/lib/recipe-types.ts` and `@recipes/shared/planner` for exactly this
   reason.
+- **`@recipes/shared/llm` inherits that rule and is worse if broken.** It pulls
+  in the `openai` SDK, so a client import ships the provider SDK to the browser
+  and nothing errors — the page just gets fatter. Both subpaths are deliberately
+  absent from the package barrel, which is the only thing standing between an
+  `import … from '@recipes/shared'` in a component and that outcome. The check
+  is a production build plus a grep of `apps/web/.next/static` for `OpenAI` and
+  `openrouter.ai`; it was clean when the transport moved, and it stops being
+  free once `apps/web` has a real caller.
+- **`@recipes/db/llm-budget` is the server-side seam for both apps.** It is
+  deliberately absent from the `@recipes/db` barrel and receives a database
+  explicitly; keep it that way so importing budget types does not open a
+  second connection or make client code inherit server accounting.
 - Keep the committed source HTML fixtures. Tests must never crawl.
 
 ---

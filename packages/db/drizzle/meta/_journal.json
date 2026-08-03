@@ -29,6 +29,13 @@
       "when": 1785098682991,
       "tag": "0003_parched_king_cobra",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785881000000,
+      "tag": "0004_search",
+      "breakpoints": true
     }
   ]
 }

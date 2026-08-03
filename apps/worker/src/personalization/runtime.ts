@@ -16,10 +16,12 @@
 
 import { db, sql } from '@recipes/db';
 import {
-  beginEnrichmentRun,
   createBudgetedLlmCallOptions,
-  finishEnrichmentRun,
   isLlmBudgetExceeded,
+} from '@recipes/db/llm-budget';
+import {
+  beginEnrichmentRun,
+  finishEnrichmentRun,
 } from '../enrichment';
 import type { StructuredOutputClient } from '../llm';
 import { deriveHardRulesForUser } from './hard-rules';
@@ -63,6 +65,7 @@ export async function runPersonalizationForUser(
     createBudgetedLlmCallOptions({
       db,
       runId: options.runId,
+      kind: 'scan',
       dailyBudgetUsd: options.dailyBudgetUsd,
       signal: options.signal,
       now: options.now,

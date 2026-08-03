@@ -8,12 +8,14 @@ import {
 } from '@recipes/db/schema';
 import type { Database } from '@recipes/db/client';
 import {
+  getDailyLlmUsage,
+  recordLlmUsage,
+} from '@recipes/db/llm-budget';
+import {
   beginEnrichmentRun,
   completeRecipeEnrichment,
   finishEnrichmentRun,
-  getDailyLlmUsage,
   loadNextPendingRecipe,
-  recordLlmUsage,
 } from '../src/enrichment/postgres';
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -209,14 +211,14 @@ integration('Phase 2 enrichment persistence', () => {
     );
     runIds.push(previousDayRun, currentRun);
 
-    await recordLlmUsage(db, previousDayRun, {
+    await recordLlmUsage(db, previousDayRun, 'scan', {
       tokensIn: 9_999,
       tokensOut: 999,
       costUsd: 0.9,
     });
     await Promise.all(
       Array.from({ length: 20 }, () =>
-        recordLlmUsage(db, currentRun, {
+        recordLlmUsage(db, currentRun, 'scan', {
           tokensIn: 100,
           tokensOut: 25,
           costUsd: 0.0005,
@@ -226,6 +228,7 @@ integration('Phase 2 enrichment persistence', () => {
 
     const usage = await getDailyLlmUsage(
       db,
+      'scan',
       new Date('2099-07-26T20:00:00.000Z'),
     );
     expect(usage).toMatchObject({

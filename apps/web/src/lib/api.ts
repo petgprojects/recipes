@@ -8,7 +8,7 @@ import type { GroceryAisleGroup } from '@recipes/shared/grocery';
 import type { CheckedMap, PlannerState, SavedMap } from '@recipes/shared/planner';
 import type { CookLogCreate, CookLogEntry } from '@recipes/shared/ratings';
 import type { HardRule } from '@recipes/shared/personalization';
-import type { RecipeDetail, RecipeSummary } from './recipe-types';
+import type { RecipeDetail, RecipeSummary, SearchResponse } from './recipe-types';
 
 /** PLAN.md §5: "TanStack Query with `refetchInterval` (~5 min)". */
 export const POLL_INTERVAL_MS = 5 * 60 * 1000;
@@ -240,6 +240,42 @@ export function deleteCookLog(id: string, recipeId: string): Promise<CookLogEntr
     `/api/ratings/${id}?recipeId=${recipeId}`,
     'DELETE',
   );
+}
+
+// ── Natural-language search (FILTER_PLAN Phase 5) ───────────────────────────
+
+export const searchKeys = {
+  query: (q: string) => ['search', 'query', q] as const,
+};
+
+export function fetchSearch(query: string): Promise<SearchResponse> {
+  return getJson<SearchResponse>(`/api/search?q=${encodeURIComponent(query)}`);
+}
+
+/**
+ * One search, cached by the query string.
+ *
+ * Everything here is chosen because **a search costs money** (§8: about
+ * $0.00057 and one provider call each). `staleTime: Infinity` and no refetching
+ * on focus or reconnect, so returning to the tab, or hitting the back button
+ * onto a query already run, is free; and no retry, because the two failures
+ * that matter — a 401 and the 503 at the budget gate — are both answers rather
+ * than blips, and retrying either just spends the reader's time.
+ *
+ * Enabled only for a signed-in reader with a non-empty query. Signed out the
+ * endpoint 401s and the bar is not rendered at all.
+ */
+export function useSearchQuery(query: string, enabled: boolean) {
+  return useQuery({
+    queryKey: searchKeys.query(query),
+    queryFn: () => fetchSearch(query),
+    enabled: enabled && query !== '',
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
 }
 
 // ── Hard rules (Phase 7) ────────────────────────────────────────────────────

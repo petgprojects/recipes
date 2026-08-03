@@ -4,17 +4,60 @@ This file is the quick orientation layer for coding agents. For the full
 checkpoint, read documents in this order:
 
 1. `HANDOFF.md` — current state, verified facts, credentials and exact next move.
-2. `PROGRESS.md` — authoritative amendments and phase checklist.
-3. The relevant sections of `PLAN.md` — original design; `PROGRESS.md`
-   overrides it when they disagree.
+2. The `progress/` log for the plan you are working on — authoritative amendments
+   and phase checklist.
+3. The relevant sections of the matching `plans/` document — original design; the
+   progress log overrides it when they disagree.
 4. `reqs.md` when a product decision or acceptance criterion is unclear.
+
+**Plans and their logs pair up by filename**: `plans/X.md` is designed work,
+`progress/X.md` is what actually happened to it.
+
+| Plan | Log | State |
+|---|---|---|
+| `plans/PLAN.md` | `progress/PLAN.md` | ✅ complete — Phases 0–7, amendments A1–A22 |
+| `plans/FILTER_PLAN.md` | `progress/FILTER_PLAN.md` | ✅ complete — NL search, Phases 1–6, amendments A23–A39 |
+
+Amendment numbering is continuous across plans, so "amendment A18" resolves to
+exactly one document. Inline `PLAN.md §4` citations in source comments refer to
+`plans/PLAN.md`; they are citations, not paths, and were deliberately left
+un-rewritten when the file moved.
 
 Do not restart completed phases or re-research facts already recorded there.
 
 ## Current checkpoint
 
-- **Phase 0 through Phase 7 are complete.** Nothing is half-finished; the next
-  move is Peter's choice from `HANDOFF.md`'s options table.
+- **`PLAN.md` Phases 0–7 and `FILTER_PLAN.md` Phases 1–6 are all complete.**
+  Nothing is half-finished and no phase is queued; `HANDOFF.md` lists the open
+  options.
+- **Natural-language search works end to end.** `@recipes/shared/search` owns
+  the `SearchFilter` contract, the notice contract and their copy;
+  `packages/shared/src/llm/parse-search-query.ts` produces a filter from a
+  sentence (it lives in shared, not the worker, because the web route is its
+  only caller — amendment A35); `apps/web/src/lib/search.ts` compiles it into
+  SQL with the relaxation ladder and `searchRecipes()`; and
+  `apps/web/src/lib/search-service.ts` behind `GET /api/search` joins them to
+  the budget. The UI is `apps/web/src/components/search-bar.tsx` with `?q=` as
+  the URL state. Three rules govern every change to it, all in `HANDOFF.md` in
+  full: time compiles to `total_minutes` and never the `Under 20 min` tag; the
+  null convention is **inverted** from `hardRuleFilter()` — a typed requirement
+  drops null rows, an exclusion does not fire on them; hard rules are named in a
+  notice but never applied; and a *food* is `anyIngredients` while a specific
+  *item* is `ingredients`, because the corpus files one food under several
+  canonical names (A39).
+- **Search and enrichment budgets are separate and durable.**
+  `@recipes/db/llm-budget` is the one implementation both apps use; every read
+  and write requires `kind='scan' | 'search'`. Scan keeps advisory key 2 and
+  search uses key 3. `SEARCH_DAILY_BUDGET_USD` defaults to `$0.10`, about 175
+  measured searches per UTC day. `/ops` labels the successful day-rolling
+  search row while its UTC-day tile correctly remains total spend.
+- **The parse step is graded by a script that spends money.** 1,000 committed
+  fixtures in `apps/worker/test/fixtures/search-queries.ts` run offline in
+  `pnpm test`, and `apps/worker/scripts/check-search-parse.ts` runs the same
+  pairs against the live model — opt-in, never part of `pnpm test`. **Use
+  `--anchors`**: the thirty hand-authored cases plus every food family, 66 calls
+  and ~$0.02, against ~$0.27 for the full matrix. It scores 60–62 of 66 and the
+  failing set rotates; that is `temperature: 0` sampling, not a regression.
 - The Phase 7 loop runs nightly as scan → Phase 2 enrichment → personalization,
   and per reader as hard rules (pure SQL, always) → soft profile → batched
   scoring. Rules are a `WHERE` clause with a visible per-rule switch (A20);
@@ -68,20 +111,26 @@ Do not restart completed phases or re-research facts already recorded there.
   image caching, persistence, pg-boss jobs and cron.
 - `packages/db` — Drizzle schema, migrations, seed and database client.
 - `packages/shared` — client-safe contracts, vocabularies, display formatting,
-  grocery bucket finalization and plain-text rendering, source configuration and
-  validated environment handling.
+  grocery bucket finalization and plain-text rendering, the `SearchFilter` and
+  `SearchNotice` contracts with their copy, source configuration and validated
+  environment handling. Two subpaths are server-only and deliberately absent
+  from the barrel: `./env`, and `./llm` — which pulls in the `openai` SDK and
+  also owns the search parse prompt, the one task prompt not in the worker
+  (A35).
 - `apps/web/test` — database-backed suites for the app's queries. Added in
-  Phase 5; needs `DATABASE_URL` like the worker's integration tests.
+  `PLAN.md` Phase 5; needs `DATABASE_URL` like the worker's integration tests.
 - `apps/worker/test/fixtures` — real committed source HTML. Keep it; tests must
   not crawl the internet.
-- `PROGRESS.md` — durable implementation log and task checklist. Update it when
-  a stage changes state.
+- `plans/` — design documents, one per plan.
+- `progress/` — durable implementation log and task checklist, one per plan,
+  paired by filename. Update the current one when a stage changes state.
 
 ## Working rules
 
 - Always create a task list, keep it current, and mark every item complete when
   finished.
-- Keep `PROGRESS.md` and `HANDOFF.md` accurate after meaningful checkpoints.
+- Keep the current `progress/` log and `HANDOFF.md` accurate after meaningful
+  checkpoints.
 - Prefer one reviewable commit per stage.
 - Use tightly scoped synchronous subagents for implementation when useful, then
   independently verify their claims.
@@ -239,16 +288,25 @@ issued for the old origin and will never be sent to the new one.
 
 ## Verification baseline
 
-At the Phase 7 checkpoint:
+Current, at FILTER_PLAN Phase 6:
 
-- `corepack pnpm test` (with `DATABASE_URL`) — 712 passing (shared 152, db 20,
-  worker 500, web 40). The root script runs packages one at a time on purpose;
-  see `HANDOFF.md`.
+- `corepack pnpm test` (with `DATABASE_URL`) — 1,849 passing (shared 181, db 20,
+  worker 1,551, web 97). The root script runs packages one at a time on purpose;
+  see `HANDOFF.md`. It was 712 at the Phase 7 checkpoint and through
+  FILTER_PLAN Phase 1; Phase 2 added 50, Phase 3 another 65, Phase 4 another 9,
+  the 1,000-case stress extension took it to 1,806, Phase 5 added 26 and
+  Phase 6 another 17 — without changing an existing assertion.
 - `corepack pnpm typecheck` — clean across all workspaces.
-- Production Next.js build — passing.
+- Production Next.js build — passing, and `apps/web/.next/static` greps clean
+  for `OpenAI`, `openrouter.ai`, `createOpenRouterClient` and
+  `StructuredOutputError`. **Run that grep now that `apps/web` calls the model**
+  — it stopped being free at Phase 5.
 - `/api/health` — healthy with 425 recipes.
 - `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file` — HTTP 200,
   and `POST /api/grocery` — HTTP 200.
+- `GET /api/search` — 401 signed out, 400 on an empty or oversized `q`, 503 at
+  the 90% search-budget gate, 200 otherwise. A 200 spends real money; the other
+  three do not.
 
 For a change, run the focused test first, then the full relevant suite. Verify
 database, queue, crawl or UI exit criteria directly rather than relying only on

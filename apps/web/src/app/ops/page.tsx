@@ -211,12 +211,12 @@ export default async function OpsPage() {
           <div className={styles.sectionHeading}>
             <div>
               <p className={styles.sectionIndex}>03 / recent activity</p>
-              <h2 id="history-heading">Scan history</h2>
+              <h2 id="history-heading">Run history</h2>
             </div>
-            <p>The 24 most recent source runs, newest first.</p>
+            <p>The 24 most recent scan and search runs, newest first.</p>
           </div>
           {snapshot.recentScans.length === 0 ? (
-            <p className={styles.emptyState}>No scan runs yet. Queue the first scan above.</p>
+            <p className={styles.emptyState}>No runs yet. Queue the first scan above.</p>
           ) : (
             <div className={styles.tableScroll}>
               <table className={styles.table}>

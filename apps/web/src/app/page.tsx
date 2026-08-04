@@ -7,24 +7,14 @@
  * shape, which is what makes it safe to hand the rows straight to TanStack
  * Query as `initialData`.
  *
- * A database that is down must not render as "no recipes" — that is the same
- * distinction `/api/recipes` makes with its 503 — so the failure has its own
- * state.
+ * The loading itself lives in `PlannerPage`, shared with `/r/<handle>`; a
+ * database that is down must not render as "no recipes", and that distinction
+ * is made there, once, for both routes.
  */
 
 import type { Metadata } from 'next';
-import type { PlannerState } from '@recipes/shared/planner';
-import type { HardRule } from '@recipes/shared/personalization';
-import { Planner } from '@/components/planner';
-import { isAuthConfigured } from '@/lib/auth';
-import { getCurrentUser } from '@/lib/current-user';
-import { readPlannerState } from '@/lib/planner';
-import { getUserPreferences } from '@/lib/preferences';
-import { BROWSE_LIMIT, listRecipes } from '@/lib/recipes';
-import { getSearchAvailability } from '@/lib/search-service';
+import { PlannerPage } from '@/components/planner-page';
 import { MAX_SEARCH_QUERY_CHARS } from '@recipes/shared/search';
-import type { RecipeSummary } from '@/lib/recipe-types';
-import type { PlannerUser } from '@/lib/saved-store';
 import '@/styles/artifact.css';
 
 export const runtime = 'nodejs';
@@ -50,77 +40,10 @@ export default async function Home({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  let recipes: RecipeSummary[] = [];
-  let failure: string | null = null;
-  let user: PlannerUser | null = null;
-  let plannerState: PlannerState | undefined;
-  let hardRules: HardRule[] = [];
-  let searchAvailable = false;
-
   const raw = (await searchParams).q;
   const initialQuery = (Array.isArray(raw) ? (raw[0] ?? '') : (raw ?? ''))
     .trim()
     .slice(0, MAX_SEARCH_QUERY_CHARS);
 
-  try {
-    // Sequential rather than parallel on purpose: the picks read needs the user
-    // id, and a failed session lookup should not leave a dangling query.
-    user = await getCurrentUser();
-    // Before the browse query, not alongside it: the rules are an argument to
-    // it. `/api/recipes` resolves them the same way, which is what keeps this
-    // render usable as the client's `initialData`.
-    const preferences = await getUserPreferences(user?.id ?? null);
-    hardRules = preferences.rules;
-
-    const [rows, saved, availability] = await Promise.all([
-      listRecipes({ limit: BROWSE_LIMIT, hardRules, userId: user?.id ?? null }),
-      user === null ? Promise.resolve(undefined) : readPlannerState(user.id),
-      // §8: the bar is disabled with an explanation at the 90% gate, never
-      // hidden — so the first paint has to know, rather than the reader
-      // learning it by typing a query and getting a 503. Signed out there is
-      // no bar to disable and no reason to read the budget.
-      user === null ? Promise.resolve(null) : getSearchAvailability(),
-    ]);
-    recipes = rows;
-    plannerState = saved;
-    searchAvailable = availability?.available ?? false;
-  } catch (error: unknown) {
-    failure = error instanceof Error ? error.message : String(error);
-  }
-
-  if (failure !== null) {
-    return (
-      <div className="mp">
-        <div className="mp-wrap">
-          <header className="mp-head">
-            <div className="mp-eyebrow">Recipe planner</div>
-            <h1 className="mp-title">
-              Can&apos;t reach
-              <br />
-              <em>the kitchen.</em>
-            </h1>
-            <p className="mp-sub">
-              The recipe database did not answer: {failure}. Nothing has been lost — check{' '}
-              <a className="mp-link" href="/ops">
-                /ops
-              </a>{' '}
-              and reload.
-            </p>
-          </header>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <Planner
-      initialRecipes={recipes}
-      user={user}
-      initialPlannerState={plannerState}
-      initialHardRules={hardRules}
-      authEnabled={isAuthConfigured}
-      initialQuery={initialQuery}
-      searchAvailable={searchAvailable}
-    />
-  );
+  return <PlannerPage initialQuery={initialQuery} />;
 }

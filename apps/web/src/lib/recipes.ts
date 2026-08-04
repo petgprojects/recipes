@@ -80,6 +80,7 @@ export interface ListRecipesOptions {
 export const summaryColumns = {
   id: recipes.id,
   slug: recipes.slug,
+  shareCode: recipes.shareCode,
   title: recipes.title,
   blurb: recipes.blurb,
   category: recipes.category,
@@ -192,6 +193,38 @@ export async function listRecipes(options: ListRecipesOptions = {}): Promise<Rec
     .limit(limit);
 
   return rows.map(toSummary);
+}
+
+/**
+ * One recipe by its share code — the `/r/<handle>` lookup.
+ *
+ * A summary rather than a detail, on purpose: the share route renders the same
+ * sheet the browse feed opens, and that sheet already fetches its own steps and
+ * ingredient lines from `/api/recipes/:id`. Loading them again on the server
+ * would double the work to show the same words.
+ *
+ * **`active` rows only, and no `status` option to widen it.** Everywhere else
+ * that argument exists for `/ops`-style inspection; here it would mean a link
+ * could publish a rejected page or one that has not been enriched — a card with
+ * no blurb and no category, which `recipes_active_enrichment_complete` exists
+ * to keep off the site. A code for a non-active recipe resolves to `null` and
+ * the route 404s.
+ */
+export async function getRecipeByShareCode(
+  shareCode: string,
+  options: { userId?: string | null } = {},
+): Promise<RecipeSummary | null> {
+  const [row] = await db
+    .select(summaryColumns)
+    .from(recipes)
+    .innerJoin(sources, eq(sources.id, recipes.sourceId))
+    // The reader's own score, same as the feed — so a shared recipe opened by a
+    // signed-in reader carries the score reason their other cards carry.
+    .leftJoin(recipeScores, scoreJoin(options.userId))
+    .where(and(eq(recipes.shareCode, shareCode), eq(recipes.status, 'active')))
+    .limit(1);
+
+  return row === undefined ? null : toSummary(row);
 }
 
 /** One recipe with its steps and ingredient lines, or `null` if there is none. */

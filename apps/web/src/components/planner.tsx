@@ -21,6 +21,7 @@ import { CATEGORY_FILTER_ALL, CATEGORY_FILTER_UI } from '@recipes/shared/vocab';
 import { countGroceryItems } from '@recipes/shared/grocery';
 import type { PlannerState } from '@recipes/shared/planner';
 import type { HardRule } from '@recipes/shared/personalization';
+import { SHARE_PATH_PREFIX } from '@recipes/shared/share';
 import {
   ApiError,
   useGroceryQuery,
@@ -68,6 +69,17 @@ interface PlannerProps {
   initialQuery?: string;
   /** False at the §8 budget gate: the bar renders disabled, never hidden. */
   searchAvailable?: boolean;
+  /**
+   * The recipe a `/r/<handle>` share link asked for, already resolved. Its
+   * sheet is open on the first paint — a shared link that rendered the browse
+   * feed and *then* opened a sheet would flash the wrong page at the person who
+   * followed it.
+   *
+   * It is passed as a whole recipe rather than an id because it need not be in
+   * the browse feed at all: `BROWSE_LIMIT` caps that list, and the sheet
+   * resolves what it shows through `byId`.
+   */
+  initialOpenRecipe?: RecipeSummary | null;
 }
 
 export function Planner({
@@ -78,10 +90,11 @@ export function Planner({
   authEnabled,
   initialQuery = '',
   searchAvailable = false,
+  initialOpenRecipe = null,
 }: PlannerProps) {
   const [tab, setTab] = useState<Tab>('browse');
   const [category, setCategory] = useState<string>(CATEGORY_FILTER_ALL);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(initialOpenRecipe?.id ?? null);
   const [shown, setShown] = useState<RecipeSummary[]>(initialRecipes);
   const [query, setQuery] = useState<string>(initialQuery);
 
@@ -135,6 +148,22 @@ export function Planner({
 
   const clearSearch = useCallback(() => goToQuery(''), [goToQuery]);
 
+  /**
+   * Closing the sheet, which on a share link also means leaving the share URL.
+   *
+   * `/r/<handle>` describes the sheet that is now closed. Left in the address
+   * bar it would outlive what it describes twice over: a reload would reopen
+   * the sheet the reader just dismissed, and the next search would push `?q=`
+   * onto the share path rather than onto the planner. `replaceState`, not
+   * `pushState` — closing a sheet is not a place to go back to.
+   */
+  const closeSheet = useCallback(() => {
+    setOpenId(null);
+    if (window.location.pathname.startsWith(`${SHARE_PATH_PREFIX}/`)) {
+      window.history.replaceState(null, '', '/');
+    }
+  }, []);
+
   useEffect(() => {
     const onPopState = () => {
       setQuery(new URLSearchParams(window.location.search).get('q')?.trim() ?? '');
@@ -182,8 +211,14 @@ export function Planner({
     for (const recipe of searchQuery.data?.recipes ?? []) {
       if (!map.has(recipe.id)) map.set(recipe.id, recipe);
     }
+    // And the shared recipe, which may be in none of the three: the feed is
+    // capped at `BROWSE_LIMIT` and a hard rule can filter it out of that list
+    // entirely. Followed a link, so it opens.
+    if (initialOpenRecipe !== null && !map.has(initialOpenRecipe.id)) {
+      map.set(initialOpenRecipe.id, initialOpenRecipe);
+    }
     return map;
-  }, [live, shown, searchQuery.data]);
+  }, [live, shown, searchQuery.data, initialOpenRecipe]);
 
   /** A saved recipe may have left the browse feed; its detail still resolves. */
   const savedRecipes = useMemo(
@@ -451,7 +486,7 @@ export function Planner({
           batches={store.saved[open.id] ?? 1}
           signedIn={user !== null}
           onToggleSave={store.toggleSaved}
-          onClose={() => setOpenId(null)}
+          onClose={closeSheet}
         />
       )}
     </div>

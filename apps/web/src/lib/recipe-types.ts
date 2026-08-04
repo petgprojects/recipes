@@ -21,6 +21,13 @@ export type RecipeStatusValue = 'pending' | 'active' | 'rejected';
 export interface RecipeSummary {
   id: string;
   slug: string;
+  /**
+   * The public link key. `id` identifies a recipe to this application;
+   * `shareCode` identifies it in a URL someone pastes into a text message. Both
+   * travel with the card because the share button is on the card's sheet and
+   * must not need a second request to know what link to copy.
+   */
+  shareCode: string;
   title: string;
   blurb: string | null;
   category: string | null;

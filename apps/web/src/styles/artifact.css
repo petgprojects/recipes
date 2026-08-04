@@ -347,7 +347,21 @@
  *  stylesheet. Converted to classes; apply alongside the base class.
  * ---------------------------------------------------------------- */
 .mp-grid-single { grid-template-columns: 1fr; }
-.mp-card-acts-spaced { margin-top: 24px; }
+/* `wrap` is what lets this row hold the share button as a third control: on a
+   narrow phone the buttons drop onto a second line instead of squeezing, and
+   the manual-copy field claims a whole line of its own. */
+.mp-card-acts-spaced { margin-top: 24px; flex-wrap: wrap; }
+.mp-share-manual { flex: 1 0 100%; margin-top: 10px; display: block; }
+.mp-share-manual-label {
+  display: block; font-family: var(--mono); font-size: 10.5px;
+  letter-spacing: .09em; text-transform: uppercase; color: var(--beet-soft);
+  margin-bottom: 5px;
+}
+.mp-share-url {
+  width: 100%; padding: 9px 11px; border-radius: 9px;
+  border: 1.5px solid var(--line); background: var(--paper);
+  font-family: var(--mono); font-size: 12px; color: var(--slate);
+}
 
 /* ---------------------------------------------------------------- *
  *  Phase 5. The list is merged in SQL now; what is new here is the

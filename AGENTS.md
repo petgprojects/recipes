@@ -17,6 +17,11 @@ checkpoint, read documents in this order:
 |---|---|---|
 | `plans/PLAN.md` | `progress/PLAN.md` | ✅ complete — Phases 0–7, amendments A1–A22 |
 | `plans/FILTER_PLAN.md` | `progress/FILTER_PLAN.md` | ✅ complete — NL search, Phases 1–6, amendments A23–A39 |
+| *(none — unplanned)* | `progress/SHARE_LINKS.md` | ✅ complete — in-site share links, amendments A40–A45 |
+
+`progress/SHARE_LINKS.md` is the one log with no plan beside it: it was a
+single-session feature request, so that file is both the design record and the
+log.
 
 Amendment numbering is continuous across plans, so "amendment A18" resolves to
 exactly one document. Inline `PLAN.md §4` citations in source comments refer to
@@ -45,6 +50,15 @@ Do not restart completed phases or re-research facts already recorded there.
   notice but never applied; and a *food* is `anyIngredients` while a specific
   *item* is `ingredients`, because the corpus files one food under several
   canonical names (A39).
+- **Recipes have shareable in-site links.** `/r/<slug>-<share_code>` renders the
+  planner with the detail sheet already open, and the "Share" button in that
+  sheet hands the link over. `recipes.share_code` is eight unambiguous
+  characters with a database `DEFAULT`, so the worker knows nothing about this;
+  `@recipes/shared/share` owns the handle format. Two rules govern any change:
+  **resolution is on the code alone** — the slug is decoration, so a retitled
+  recipe keeps its old links and gets a 307 — and the lookup is `active`-only
+  and bypasses the reader's hard rules, because a link is one recipe someone was
+  sent rather than a feed. Full account in `progress/SHARE_LINKS.md` (A40–A45).
 - **Search and enrichment budgets are separate and durable.**
   `@recipes/db/llm-budget` is the one implementation both apps use; every read
   and write requires `kind='scan' | 'search'`. Scan keeps advisory key 2 and
@@ -112,7 +126,8 @@ Do not restart completed phases or re-research facts already recorded there.
 - `packages/db` — Drizzle schema, migrations, seed and database client.
 - `packages/shared` — client-safe contracts, vocabularies, display formatting,
   grocery bucket finalization and plain-text rendering, the `SearchFilter` and
-  `SearchNotice` contracts with their copy, source configuration and validated
+  `SearchNotice` contracts with their copy, the share-link handle format
+  (`./share`), source configuration and validated
   environment handling. Two subpaths are server-only and deliberately absent
   from the barrel: `./env`, and `./llm` — which pulls in the `openai` SDK and
   also owns the search parse prompt, the one task prompt not in the worker
@@ -288,14 +303,15 @@ issued for the old origin and will never be sent to the new one.
 
 ## Verification baseline
 
-Current, at FILTER_PLAN Phase 6:
+Current, at share links (`progress/SHARE_LINKS.md`):
 
-- `corepack pnpm test` (with `DATABASE_URL`) — 1,849 passing (shared 181, db 20,
-  worker 1,551, web 97). The root script runs packages one at a time on purpose;
+- `corepack pnpm test` (with `DATABASE_URL`) — 1,873 passing (shared 199, db 20,
+  worker 1,551, web 103). The root script runs packages one at a time on purpose;
   see `HANDOFF.md`. It was 712 at the Phase 7 checkpoint and through
   FILTER_PLAN Phase 1; Phase 2 added 50, Phase 3 another 65, Phase 4 another 9,
   the 1,000-case stress extension took it to 1,806, Phase 5 added 26 and
-  Phase 6 another 17 — without changing an existing assertion.
+  Phase 6 another 17, and share links another 24 — without changing an existing
+  assertion.
 - `corepack pnpm typecheck` — clean across all workspaces.
 - Production Next.js build — passing, and `apps/web/.next/static` greps clean
   for `OpenAI`, `openrouter.ai`, `createOpenRouterClient` and
@@ -304,6 +320,9 @@ Current, at FILTER_PLAN Phase 6:
 - `/api/health` — healthy with 425 recipes.
 - `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`, `/api/images/:file` — HTTP 200,
   and `POST /api/grocery` — HTTP 200.
+- `/r/<slug>-<code>` — 200; a bare code or a stale slug 307s to the canonical
+  handle; an unknown code or a handle with no code in it 404s. None of these
+  cost anything.
 - `GET /api/search` — 401 signed out, 400 on an empty or oversized `q`, 503 at
   the 90% search-budget gate, 200 otherwise. A 200 spends real money; the other
   three do not.

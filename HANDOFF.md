@@ -79,8 +79,13 @@ reader either way. §3.1 makes exactly this any-versus-all argument for tags and
 never made it for ingredients. Amendment **A39**, with a fourth deterministic
 repair and a cheap `--anchors` mode on the check script.
 
-**There is no next phase in this plan.** The options below are open and
-unstarted:
+**There is no next phase in this plan.** One feature has shipped since it
+closed: **in-site share links**, on 2026-08-02, unplanned and logged in
+[`progress/SHARE_LINKS.md`](./progress/SHARE_LINKS.md) as amendments A40–A45.
+Every recipe now has a `/r/<slug>-<code>` URL and a Share button in its sheet.
+Its one open item is a browser click-through.
+
+The options below remain open and unstarted:
 
 | Option | What it is |
 | --- | --- |
@@ -183,6 +188,8 @@ off a screenshot are the correct ones to pass back.
 ## Current state
 
 - **425 recipes**: 235 `active`, 190 `rejected`, 0 `pending`; no duplicate URLs.
+  Each now carries a unique eight-character `share_code` (migration 0005) —
+  425 rows, 425 distinct codes, all well-formed.
 - **4,617 ingredient rows**, 4,456 mapped across 789 canonical ingredients and
   1,733 aliases. The 161 unmapped are compound/alternative lines that still
   render from `raw_text` — a successful terminal condition, not a backlog.
@@ -203,8 +210,8 @@ off a screenshot are the correct ones to pass back.
   exactly Phase 3's estimate — about **160–175 searches per UTC day** at the
   `$0.10` default.
 
-Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **1,849
-passing** (shared 181, db 20, worker 1,551, web 97); all four typechecks clean;
+Verified at this checkpoint: `corepack pnpm test` with `DATABASE_URL` — **1,873
+passing** (shared 199, db 20, worker 1,551, web 103); all four typechecks clean;
 production build clean; all four secrets absent from `apps/web/.next/static`,
 and so are `OpenAI`, `openrouter.ai`, `createOpenRouterClient` and
 `StructuredOutputError`; `/`, `/ops`, `/api/recipes`, `/api/recipes/:id`,
@@ -213,6 +220,14 @@ and so are `OpenAI`, `openrouter.ai`, `createOpenRouterClient` and
 `GET /api/search` all respond correctly with the Compose stack up. Signed out,
 `/api/recipes` returns all 235 active recipes with every `score` null, and both
 `/api/preferences/rules` and `/api/search?q=…` are 401.
+
+Share links, added 2026-08-02 (`progress/SHARE_LINKS.md`, A40–A45), verified the
+same way: `/r/<slug>-<code>` is a 200 with the sheet server-rendered into the
+markup and its Open Graph tags carrying the title, our blurb and a real cached
+photo; a bare code or a stale slug 307s to canonical; an unknown code 404s.
+**Its browser click-through is the one thing not done** — the extension was not
+connected — so the clipboard copy, the "Link copied" state and the
+`replaceState` on close are proven only from the server's markup.
 
 The production build needs `DATABASE_URL` in its environment — `/api/health`
 imports `@recipes/shared/env` at module scope, so `next build` fails at "collect
@@ -241,6 +256,28 @@ browse carried on working.
 ## Invariants — these will bite you
 
 Each one has a plausible-looking wrong version, and most fail silently.
+
+### Share links (A40–A45)
+
+- **`recipes.slug` is not unique and must never key a link.** 425 recipes, 419
+  distinct slugs; one slug appears three times. The plausible-looking wrong
+  version is `/r/<slug>`, and it resolves to whichever duplicate the query
+  happens to return first — silently, and differently over time.
+- **A handle resolves on its code, and the code is the LAST hyphen-delimited
+  segment.** Not the first segment that looks like a code: slugs contain
+  hyphens, and an eight-character code-shaped word inside one is ordinary.
+- **The code is a database `DEFAULT`, so no writer assigns it.** Adding a
+  `shareCode` to an insert in the worker is not needed and would be the first
+  place the two could disagree. `gen_share_code()` retries on collision.
+- **Its `CHECK` and `parseRecipeHandle()` must stay identical.** A code the
+  database accepts and the parser rejects is a 404 with no visible cause.
+- **The lookup is `active`-only and ignores the reader's hard rules.** Widening
+  the status would let a link publish a rejected or un-enriched recipe;
+  applying the rules would make a link someone was *sent* look broken because
+  the recipient filters out pork.
+- **`notFound()` and `redirect()` must stay outside `PlannerPage`'s `try`.**
+  Both throw. Inside it they are caught by the database-failure handler and
+  become a 200 page reading "can't reach the kitchen".
 
 ### Search (FILTER_PLAN Phases 2–6, A27, A28, A32, A33, A35–A39)
 

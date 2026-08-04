@@ -24,6 +24,7 @@ import { useRecipeDetail } from '@/lib/api';
 import type { RecipeSummary } from '@/lib/recipe-types';
 import { RatingForm } from './rating-form';
 import { RecipePhoto } from './recipe-photo';
+import { ShareButton } from './share-button';
 
 interface RecipeSheetProps {
   recipe: RecipeSummary;
@@ -159,6 +160,11 @@ export function RecipeSheet({
           >
             {saved ? 'Remove from picks' : 'Save it'}
           </button>
+          {/* Beside the source link above rather than instead of it. That link
+              is attribution and PLAN.md §7 requires it; this one is the recipe
+              as *this* site renders it — our blurb, the parsed ingredient
+              lines, and a "Save it" the recipient can actually press. */}
+          <ShareButton recipe={recipe} />
           <button className="mp-btn" onClick={onClose}>
             Close
           </button>

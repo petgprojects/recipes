@@ -93,6 +93,56 @@ describe('Reddit scan orchestration', () => {
     );
   });
 
+  it('persists every recipe in a roundup post and counts them individually', async () => {
+    const roundup = post('roundup');
+    const drafts = [
+      draft(`${roundup.permalink}?recipe=gochujang-chicken`),
+      draft(`${roundup.permalink}?recipe=hainanese-chicken`),
+      draft(`${roundup.permalink}?recipe=chia-tea`),
+    ];
+    const persistRecipe =
+      vi.fn<RedditScanOrchestratorDependencies['persistRecipe']>(
+        async (input) => ({
+          // Only the middle one is new, so `newCount` cannot simply track the
+          // number of drafts.
+          outcome: input.draft.sourceUrl.includes('hainanese')
+            ? 'inserted'
+            : 'unchanged',
+          recipeId: `recipe-${input.draft.sourceUrl}`,
+          sourceUrl: input.draft.sourceUrl,
+        }),
+      );
+    const dependencies = baseDependencies({
+      discoverPosts: vi.fn(async () => ({
+        posts: [roundup],
+        crossedCheckpoint: true,
+        truncated: false,
+        pages: 1,
+      })),
+      routePost: vi.fn<RedditScanOrchestratorDependencies['routePost']>(
+        async () => ({
+          outcome: 'recipe',
+          method: 'reddit-llm',
+          drafts,
+          publisherSource: null,
+          warnings: [],
+        }),
+      ),
+      persistRecipe,
+    });
+
+    const summary = await createRedditScanOrchestrator(dependencies).scanAll();
+
+    expect(persistRecipe).toHaveBeenCalledTimes(3);
+    expect(
+      persistRecipe.mock.calls.map(([input]) => input.draft.sourceUrl),
+    ).toEqual(drafts.map((item) => item.sourceUrl));
+    // Ingredients are normalized per recipe, not once per post.
+    expect(dependencies.normalizeIngredients).toHaveBeenCalledTimes(3);
+    expect(summary).toMatchObject({ found: 3, newCount: 1, noRecipeCount: 0 });
+    expect(summary.sources[0]).toMatchObject({ status: 'success' });
+  });
+
   it('persists external links under their blog source and self-posts under Reddit', async () => {
     const external = post('external');
     const self = post('self');
@@ -477,7 +527,7 @@ function recipeRoute(
   return {
     outcome: 'recipe',
     method,
-    draft: recipeDraft,
+    drafts: [recipeDraft],
     publisherSource,
     warnings: [],
   };

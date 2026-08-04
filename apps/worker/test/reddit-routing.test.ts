@@ -63,10 +63,10 @@ describe('Reddit recipe routing', () => {
       outcome: 'recipe',
       method: 'external-jsonld',
       publisherSource: expect.objectContaining({ slug: 'budget-bytes' }),
-      draft: expect.objectContaining({ title: 'Weeknight Beans' }),
+      drafts: [expect.objectContaining({ title: 'Weeknight Beans' })],
     });
     expect(llm.extractRecipe).not.toHaveBeenCalled();
-    expect(llm.extractRecipeFromPost).not.toHaveBeenCalled();
+    expect(llm.extractRecipesFromPost).not.toHaveBeenCalled();
     expect(loadTopComments).not.toHaveBeenCalled();
   });
 
@@ -91,20 +91,22 @@ describe('Reddit recipe routing', () => {
     expect(result).toMatchObject({
       outcome: 'recipe',
       method: 'external-html-llm',
-      draft: expect.objectContaining({
-        sourceUrl: 'https://budgetbytes.com/chickpea-meal-prep',
-        rawJsonld: null,
-      }),
+      drafts: [
+        expect.objectContaining({
+          sourceUrl: 'https://budgetbytes.com/chickpea-meal-prep',
+          rawJsonld: null,
+        }),
+      ],
     });
     expect(llm.extractRecipe).toHaveBeenCalledTimes(1);
-    expect(llm.extractRecipeFromPost).not.toHaveBeenCalled();
+    expect(llm.extractRecipesFromPost).not.toHaveBeenCalled();
   });
 
   it('prepares a bounded post/comment prompt when no external recipe succeeds', async () => {
     const llm = llmMock();
-    vi.mocked(llm.extractRecipeFromPost).mockResolvedValue({
-      outcome: 'recipe',
-      recipe: candidate('Lentil Lunch Bowls'),
+    vi.mocked(llm.extractRecipesFromPost).mockResolvedValue({
+      outcome: 'recipes',
+      recipes: [candidate('Lentil Lunch Bowls')],
     });
     const item = post({
       title: 'Five lentil lunches',
@@ -130,12 +132,14 @@ describe('Reddit recipe routing', () => {
       outcome: 'recipe',
       method: 'reddit-llm',
       publisherSource: null,
-      draft: expect.objectContaining({
-        sourceUrl: item.permalink,
-        publishedAt: item.createdAt,
-      }),
+      drafts: [
+        expect.objectContaining({
+          sourceUrl: item.permalink,
+          publishedAt: item.createdAt,
+        }),
+      ],
     });
-    expect(llm.extractRecipeFromPost).toHaveBeenCalledWith(
+    expect(llm.extractRecipesFromPost).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceUrl: item.permalink,
         prompt: expect.stringContaining('Simmer for twenty minutes.'),
@@ -145,7 +149,7 @@ describe('Reddit recipe routing', () => {
 
   it('does not send a linked roundup through external HTML fallback', async () => {
     const llm = llmMock();
-    vi.mocked(llm.extractRecipeFromPost).mockResolvedValue({
+    vi.mocked(llm.extractRecipesFromPost).mockResolvedValue({
       outcome: 'not-recipe',
       reason: 'roundup only',
     });
@@ -165,7 +169,107 @@ describe('Reddit recipe routing', () => {
       reason: 'roundup only',
     });
     expect(llm.extractRecipe).not.toHaveBeenCalled();
-    expect(llm.extractRecipeFromPost).toHaveBeenCalledTimes(1);
+    expect(llm.extractRecipesFromPost).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a post holding several recipes', () => {
+  it('returns one draft per recipe, each under a distinct source URL', async () => {
+    const llm = llmMock();
+    vi.mocked(llm.extractRecipesFromPost).mockResolvedValue({
+      outcome: 'recipes',
+      recipes: [
+        candidate('Gochujang coconut chicken thighs'),
+        candidate('Hainanese chicken and rice'),
+        candidate('Chia rosé herbal tea'),
+      ],
+    });
+    const item = post({ title: 'meal prep challenge week 8' });
+
+    const result = await routeRedditPost(item, redditSource, {
+      fetchExternal: vi.fn(),
+      loadTopComments: async () => [],
+      llm,
+    });
+
+    expect(result.outcome).toBe('recipe');
+    if (result.outcome !== 'recipe') return;
+    expect(result.drafts.map((draft) => draft.title)).toEqual([
+      'Gochujang coconut chicken thighs',
+      'Hainanese chicken and rice',
+      'Chia rosé herbal tea',
+    ]);
+    // Distinct, and still real links to the post they came from. A `#fragment`
+    // would not survive `canonicalUrlKey()`, which clears the hash before the
+    // uniqueness check.
+    expect(result.drafts.map((draft) => draft.sourceUrl)).toEqual([
+      `${item.permalink}?recipe=gochujang-coconut-chicken-thighs`,
+      `${item.permalink}?recipe=hainanese-chicken-and-rice`,
+      `${item.permalink}?recipe=chia-rose-herbal-tea`,
+    ]);
+    expect(new Set(result.drafts.map((d) => d.sourceUrl)).size).toBe(3);
+  });
+
+  it('leaves a single-recipe post on its bare permalink', async () => {
+    const llm = llmMock();
+    vi.mocked(llm.extractRecipesFromPost).mockResolvedValue({
+      outcome: 'recipes',
+      recipes: [candidate('Lentil Lunch Bowls')],
+    });
+    const item = post();
+
+    const result = await routeRedditPost(item, redditSource, {
+      fetchExternal: vi.fn(),
+      loadTopComments: async () => [],
+      llm,
+    });
+
+    expect(result.outcome).toBe('recipe');
+    if (result.outcome !== 'recipe') return;
+    expect(result.drafts).toHaveLength(1);
+    expect(result.drafts[0]?.sourceUrl).toBe(item.permalink);
+  });
+
+  it('drops a recipe whose slug collides and says so in a warning', async () => {
+    const llm = llmMock();
+    vi.mocked(llm.extractRecipesFromPost).mockResolvedValue({
+      outcome: 'recipes',
+      recipes: [candidate('Chicken bowl'), candidate('Chicken bowl')],
+    });
+
+    const result = await routeRedditPost(post(), redditSource, {
+      fetchExternal: vi.fn(),
+      loadTopComments: async () => [],
+      llm,
+    });
+
+    expect(result.outcome).toBe('recipe');
+    if (result.outcome !== 'recipe') return;
+    // Keeping both would make persistence treat the second as an update of the
+    // first, silently. One row and a warning is the honest outcome.
+    expect(result.drafts).toHaveLength(1);
+    expect(result.warnings).toEqual([
+      expect.stringContaining('1 of 2'),
+    ]);
+  });
+
+  it('is not-recipe when every extracted recipe is unusable', async () => {
+    const llm = llmMock();
+    vi.mocked(llm.extractRecipesFromPost).mockResolvedValue({
+      outcome: 'recipes',
+      recipes: [{ ...candidate('No ingredients'), ingredients: [] }],
+    });
+
+    const result = await routeRedditPost(post(), redditSource, {
+      fetchExternal: vi.fn(),
+      loadTopComments: async () => [],
+      llm,
+    });
+
+    expect(result).toMatchObject({
+      outcome: 'not-recipe',
+      reason: 'LLM recipes lacked an insertable title or ingredients',
+    });
   });
 });
 
@@ -175,7 +279,7 @@ function llmMock(): RedditLlmExtractor {
       outcome: 'not-recipe' as const,
       reason: 'none',
     })),
-    extractRecipeFromPost: vi.fn(async () => ({
+    extractRecipesFromPost: vi.fn(async () => ({
       outcome: 'not-recipe' as const,
       reason: 'none',
     })),

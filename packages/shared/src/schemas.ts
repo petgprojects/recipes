@@ -279,6 +279,38 @@ export const llmRecipeExtractionResultSchema = z
   });
 
 /**
+ * The same result for a *post*, which routinely carries several recipes at
+ * once: a weekly meal-prep roundup is one submission holding five.
+ *
+ * Kept separate from `llmRecipeExtractionResultSchema` rather than replacing
+ * it, because the two describe genuinely different sources. A recipe blog page
+ * is one recipe by construction, and letting that path return a list would
+ * invite an ingredient index or a "more like this" rail to be read as extra
+ * recipes. A post has no such guarantee.
+ *
+ * The cap is a bound on a single response, not a judgement about posts: twelve
+ * is comfortably above the largest roundups observed on r/MealPrepSunday
+ * (five), and a strict `json_schema` array needs *some* ceiling.
+ */
+export const llmRecipePostExtractionResultSchema = z
+  .object({
+    found: z.boolean(),
+    reason: z.string().trim().min(1).max(400),
+    recipes: z.array(llmExtractedRecipeSchema).max(12),
+  })
+  .superRefine((value, context) => {
+    if (value.found !== (value.recipes.length > 0)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['recipes'],
+        message: value.found
+          ? 'recipes must be non-empty when found is true'
+          : 'recipes must be empty when found is false',
+      });
+    }
+  });
+
+/**
  * Canonical ingredient names contain only the ingredient identity — no amount,
  * unit, preparation note, HTML, control characters, or surrounding whitespace.
  * Lowercase storage keys make exact comparisons deterministic.
@@ -360,6 +392,9 @@ export type BlurbOutput = z.infer<typeof blurbOutputSchema>;
 export type LlmInstructionStep = z.infer<typeof llmInstructionStepSchema>;
 export type LlmExtractedRecipe = z.infer<typeof llmExtractedRecipeSchema>;
 export type LlmRecipeExtractionResult = z.infer<typeof llmRecipeExtractionResultSchema>;
+export type LlmRecipePostExtractionResult = z.infer<
+  typeof llmRecipePostExtractionResultSchema
+>;
 export type CanonicalIngredientSummary = z.infer<typeof canonicalIngredientSummarySchema>;
 export type IngredientMappingDecision = z.infer<typeof ingredientMappingDecisionSchema>;
 export type IngredientMappingOutput = z.infer<typeof ingredientMappingOutputSchema>;

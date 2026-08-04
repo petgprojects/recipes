@@ -12,7 +12,7 @@ import {
 } from '../ingredients';
 import {
   extractRecipe,
-  extractRecipeFromPost,
+  extractRecipesFromPost,
   type LlmRecipeDraft,
   type StructuredOutputCallOptions,
   type StructuredOutputClient,
@@ -35,6 +35,7 @@ import {
 import {
   routeRedditPost,
   type LlmExtractionResult,
+  type LlmPostExtractionResult,
   type LlmRecipeCandidate,
   type RedditLlmExtractor,
 } from './routing';
@@ -234,8 +235,8 @@ export function createRedditRuntimeLlmExtractor(
       return draftToExtractionResult(draft);
     },
 
-    async extractRecipeFromPost(input) {
-      const draft = await extractRecipeFromPost(
+    async extractRecipesFromPost(input) {
+      const drafts = await extractRecipesFromPost(
         client,
         {
           post: {
@@ -252,7 +253,7 @@ export function createRedditRuntimeLlmExtractor(
         },
         options,
       );
-      return draftToExtractionResult(draft);
+      return draftsToPostExtractionResult(drafts);
     },
   };
 }
@@ -311,6 +312,21 @@ function draftToExtractionResult(
   return {
     outcome: 'recipe',
     recipe: draftToCandidate(draft),
+  };
+}
+
+function draftsToPostExtractionResult(
+  drafts: readonly LlmRecipeDraft[],
+): LlmPostExtractionResult {
+  if (drafts.length === 0) {
+    return {
+      outcome: 'not-recipe',
+      reason: 'LLM found no complete recipe',
+    };
+  }
+  return {
+    outcome: 'recipes',
+    recipes: drafts.map(draftToCandidate),
   };
 }
 

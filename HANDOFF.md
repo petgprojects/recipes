@@ -91,9 +91,119 @@ The options below remain open and unstarted:
 | --- | --- |
 | **Phase 8, from PLAN.md's list** | Apple Sign In, nutrition estimates, meal-calendar assignment, pantry tracking, YouTube as a source |
 | **pgvector similarity** | PLAN.md §5 defers it deliberately: "add it later, as a *signal feeding into* the score, once there's enough history to justify it." The table exists. Today there are 0 `cook_logs`, so there is not enough history. |
-| **Reddit** | The adapter is production-wired with `enabled = false`. One boolean turns it on, and it needs credentials that reCAPTCHA has so far prevented creating. |
+| **Reddit** | **Credentials now work** and extraction has been dry-run against live posts (both 2026-08-03 — see below and the credentials section). The adapter is production-wired with `enabled = false`; one boolean in `REDDIT_SOURCES` turns it on. Cost is not the blocker (~$0.05 a scan). The open question is the **roundup** shape: multi-recipe posts currently yield only the first recipe, silently. |
 | **Live use** | Nothing is blocking daily use. The loop needs 5 rated recipes per reader before it does anything. |
 | **Deploy to the server** | Config is in place and the prod stack has been run and verified (A22): `compose.prod.yml` publishes almost nothing, `compose.tunnel.yml` adds Cloudflare Tunnel, `COMPOSE_FILE` in the server's `.env` makes bare `docker compose up -d --build` mean all of it. Waiting on Peter for the Google console's deployed redirect URI + verified domain, and a `TUNNEL_TOKEN`. A fresh server starts with **0 recipes** — the corpus is in `pgdata`, not the repo; `AGENTS.md` has a verified dump/restore runbook. |
+
+### What a live Reddit dry run showed (2026-08-03)
+
+`apps/worker/scripts/check-reddit-extraction.ts` routes live posts through the
+real seam — `routeRedditPost` + `createRedditRuntimeLlmExtractor`, the same
+composition the Postgres orchestrator builds — while persisting nothing and
+debiting no budget. Fifteen posts across `MealPrepSunday` and
+`EatCheapAndHealthy`, about $0.004 total. Three things it established, none of
+which the offline fixtures could:
+
+- **Extraction fidelity is high, and rejection precision is too.** Six of
+  fifteen routed to a recipe. The gochujang-chicken draft was checked line by
+  line against the post body: eleven ingredients in the same order, five steps
+  verbatim, `servings: 4` from "Makes 4 servings", and times correctly left null
+  rather than borrowing the post's "~2 hrs" session total. Three rejections were
+  read back too and were all genuinely prose without quantities.
+- **Roundup posts silently lose everything after the first recipe.** This is the
+  finding that matters, because it is the *dominant* post shape in
+  r/MealPrepSunday: four of the six extractions came from posts holding several
+  recipes, and each yielded only recipe #1 — the gochujang post carried five.
+  `EXTRACT_POST_SYSTEM_PROMPT` says to return `found=false` for roundups, so the
+  model is not following it, and the failure is quiet: a well-formed recipe with
+  a `source_url` pointing at a post that is mostly *other* recipes. Anything
+  that turns this source on wants a decision here first — extract many, or
+  reject the shape honestly.
+- **Reddit recipes would arrive photoless and unattributed.** Drafts came back
+  with `imageUrl: null` every time, even for `i.redd.it` link posts whose
+  `RedditPost.url` *is* a usable image, and `author: null` because
+  `parseListing()` never captures the poster in the first place. Both are in the
+  adapter, not the model.
+
+Cost is not the constraint: ~$0.00023/post, so a 200-post scan is about $0.05
+against `LLM_DAILY_BUDGET_USD=$1`.
+
+**A model swap does not fix the roundup, and cannot.** Re-run on
+`deepseek/deepseek-v4-flash-0731` over the same ten posts (`--post=` pins the
+run to one known post for exactly this comparison): the same six extractions,
+and the five-recipe gochujang post still returned recipe #1 alone, byte for byte
+the same draft. The reason is structural rather than a matter of model quality —
+`llmRecipeExtractionResultSchema` is `{ found, reason, recipe }` with `recipe` a
+**single** nullable object, sent as strict `json_schema`, so no model can return
+the other four. Whatever model is configured, "extract many" is a code change:
+the schema, `extractRecipeFromPost`, `LlmExtractionResult` and
+`RedditRouteResult` all assume one recipe per post. The one thing a model *can*
+change here is whether it honours the prompt's instruction to reject roundups
+outright; neither of these two does.
+
+The newer model is otherwise a lateral move on this task: identical hit rate on
+the same sample, ~2.6× the cost ($0.00061/post, still only ~$0.12 a scan) for 3×
+the output tokens, and on one multi-recipe post it simply picked a *different*
+recipe from the list (Rice and peas rather than Spinach Stew) — which is its own
+argument that the pick is arbitrary.
+
+### Multi-recipe extraction (2026-08-03, uncommitted at time of writing)
+
+The fix for the above, built as four changes that have to travel together:
+
+1. `llmRecipePostExtractionResultSchema` in `packages/shared/src/schemas.ts` —
+   `{ found, reason, recipes: [] }`, capped at twelve. Added **beside**
+   `llmRecipeExtractionResultSchema` rather than replacing it: a blog page is
+   one recipe by construction, and letting that path return a list would invite
+   an ingredient index or a "more like this" rail to be read as extra recipes.
+2. `extractRecipesFromPost()` (was `extractRecipeFromPost`) returns
+   `LlmRecipeDraft[]`, with `EXTRACT_POST_SYSTEM_PROMPT` rewritten to extract
+   roundups instead of rejecting them, and `maxCompletionTokens` raised 8k → 32k
+   because five recipes do not fit in a budget sized for one.
+3. `RedditRouteResult`'s recipe outcome carries `drafts` rather than `draft`.
+   The external JSON-LD and HTML paths return a single-element array.
+4. The orchestrator loops: ingredients, image and persistence per draft, and
+   `found` counts *recipes* rather than posts, so the summary agrees with the
+   rows the same loop inserts.
+
+**The load-bearing decision is the `source_url`.** `recipes.source_url` is
+unique and is the dedupe key, so five recipes from one submission cannot all be
+filed under the permalink — they would overwrite one another and leave the last
+one standing. Each therefore gets `?recipe=<slug>`. A **query parameter, not a
+`#fragment`**: `canonicalUrlKey()` clears the hash before the uniqueness check,
+so five fragments are one key. It is also still a working link, which matters
+because `source_url` is where the reader is sent. A single-recipe post keeps its
+bare permalink, so the common case is unchanged and no existing row's key moves.
+Two dishes that slugify identically are deduped in routing with a warning,
+because persistence would otherwise treat the second as an update of the first.
+
+Verified live: the five-recipe gochujang post now yields **all five**, in the
+post's own order, each under its own `?recipe=` URL, and all five really do say
+"Makes 4 servings" in the source — the uniform servings is correct, not copied.
+The Postgres integration test now drives two recipes through one post and
+asserts both rows land, which is the assertion that would have caught the
+collision.
+
+Over the same ten-post `MealPrepSunday` sweep as the baseline: **19 recipes from
+10 posts** where the one-per-post code found 6, at ~$0.00076/post — a 200-post
+scan of about $0.15 against a $1 budget. Roundups are the norm there, not the
+exception: one post gave 6, one gave 5, one gave 3.
+
+**The one regression this introduced, and its fix.** Raising
+`maxCompletionTokens` to 32k made the longest generations exceed the
+OpenRouter client's **180-second default timeout**, and `createOpenRouterClient`
+sets `maxRetries: 0`, so a timeout is a lost post rather than a slow one. Two of
+the ten died on `This operation was aborted` — both multi-dish posts that had
+succeeded while the schema could only return one recipe. The worker's client now
+passes `timeoutMs: 600_000` (`apps/worker/src/index.ts`), and both posts then
+returned 3 and 2 recipes respectively. The timeout is per *client*, not per
+call — `StructuredOutputCallOptions` has no timeout field — so this is set where
+the worker builds its client and deliberately does not touch the web app's,
+whose search parse is reader-facing and should stay impatient.
+
+Worth knowing before enabling: an aborted request is still billed by the
+provider, but `onUsage` never fires for it, so a timed-out call spends money the
+budget does not see.
 
 ### How the nightly loop fits together
 
@@ -706,8 +816,20 @@ Each one has a plausible-looking wrong version, and most fail silently.
   alone (A22).
 - `TUNNEL_TOKEN` is not configured yet. It is only read by `compose.tunnel.yml`,
   which is opt-in, so its absence blocks nothing local.
-- Reddit credentials are still unavailable (app creation fails a reCAPTCHA
-  check). The adapter is production-wired with `enabled = false`; flipping one
+- `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET` and `REDDIT_USER_AGENT` are
+  configured in local `.env` and **verified live on 2026-08-03** against the
+  real API: a token, a `/r/MealPrepSunday+EatCheapAndHealthy/new` listing and a
+  comment page all returned. Never print or commit them. The app is an existing
+  **script** app, which matters in one way worth recording: `RedditHttpClient`
+  authenticates with `grant_type=client_credentials`, Reddit's application-only
+  flow for confidential clients, so **no redirect URI is ever sent** and the one
+  registered against the app is inert. An "installed app" has no secret and
+  could not use this flow at all.
+  Re-check any time, for free, with
+  `docker compose exec worker ./node_modules/.bin/tsx scripts/check-reddit-credentials.ts`
+  (`--comments`, `--subreddit=`, `--limit=`). It touches no database, opens no
+  `scan_runs` row and calls no model.
+  The adapter remains production-wired with `enabled = false`; flipping that one
   boolean turns it on. It blocks nothing.
 - Serious Eats is approved and enabled. Classpop is intentionally removed
   everywhere — do not re-add it.

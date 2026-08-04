@@ -305,8 +305,8 @@ issued for the old origin and will never be sent to the new one.
 
 Current, at share links (`progress/SHARE_LINKS.md`):
 
-- `corepack pnpm test` (with `DATABASE_URL`) — 1,873 passing (shared 199, db 20,
-  worker 1,551, web 103). The root script runs packages one at a time on purpose;
+- `corepack pnpm test` (with `DATABASE_URL`) — 1,880 passing (shared 199, db 20,
+  worker 1,558, web 103). The root script runs packages one at a time on purpose;
   see `HANDOFF.md`. It was 712 at the Phase 7 checkpoint and through
   FILTER_PLAN Phase 1; Phase 2 added 50, Phase 3 another 65, Phase 4 another 9,
   the 1,000-case stress extension took it to 1,806, Phase 5 added 26 and
@@ -337,8 +337,18 @@ unit tests.
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `AUTH_SECRET` are configured in
   local `.env` and verified end to end against the real Google client. Never
   print or commit them.
-- Reddit credentials remain unavailable; the production-wired Reddit adapter
-  is disabled and does not block later phases.
+- `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET` and `REDDIT_USER_AGENT` are
+  configured in local `.env` and verified live against the real API on
+  2026-08-03. Never print or commit them. The adapter authenticates with
+  `client_credentials` (application-only OAuth), so the app's registered
+  redirect URI is never used. Re-check for free with
+  `apps/worker/scripts/check-reddit-credentials.ts`. The adapter is still
+  `enabled = false` and does not block later phases.
+  `apps/worker/scripts/check-reddit-extraction.ts` is the paid companion — it
+  routes live posts through the production seam and persists nothing. It is what
+  found that roundup posts yielded only their first recipe; the multi-recipe fix
+  and the `?recipe=<slug>` `source_url` rule it rests on are both in the
+  Reddit sections of `HANDOFF.md`. Read those before enabling the source.
 - The Google OAuth client and its test user use the callback
   `http://localhost:3000/api/auth/callback/google`. Changing the app's host or
   port means updating both that registration and `AUTH_URL`.

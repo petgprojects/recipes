@@ -323,6 +323,15 @@ function lazyOpenRouterClient(): StructuredOutputClient {
         apiKey: requireEnv('OPENROUTER_API_KEY'),
         baseURL: env.OPENROUTER_BASE_URL,
         model: env.OPENROUTER_MODEL,
+        // Above the 180s default, because post extraction now returns *every*
+        // recipe in a roundup: two ten-post sweep entries died on
+        // "This operation was aborted" at 180s, both multi-dish posts that had
+        // succeeded while the schema could only return one recipe. The client
+        // sets `maxRetries: 0`, so a timeout is a lost post, not a slow one.
+        // Safe to raise here specifically: every worker task is batch work on
+        // the nightly path, and the reader-facing search parse uses the web
+        // app's own client with the default.
+        timeoutMs: 600_000,
         defaultHeaders: {
           'HTTP-Referer': env.NEXT_PUBLIC_APP_URL,
           'X-OpenRouter-Title': 'Recipe Planner',

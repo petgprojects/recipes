@@ -13,6 +13,8 @@
     "repair:ingredients": "tsx scripts/repair-mismapped-ingredients.ts",
     "personalize": "tsx scripts/run-personalization.ts",
     "check:search-parse": "tsx scripts/check-search-parse.ts",
+    "check:reddit": "tsx scripts/check-reddit-credentials.ts",
+    "check:reddit-extraction": "tsx scripts/check-reddit-extraction.ts",
     "test": "vitest run"
   },
   "dependencies": {

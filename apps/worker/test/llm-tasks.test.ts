@@ -8,7 +8,7 @@ import {
   classifySuitability,
   deriveFields,
   extractRecipe,
-  extractRecipeFromPost,
+  extractRecipesFromPost,
   recipeFacts,
   serializeRecipeFacts,
   writeBlurb,
@@ -161,23 +161,25 @@ describe('Phase 2 recipe tasks', () => {
       {
         found: true,
         reason: 'The post contains quantities and steps.',
-        recipe: {
-          title: 'Breakfast Burritos',
-          total_minutes: 40,
-          active_minutes: 30,
-          servings: 6,
-          ingredients: ['6 tortillas', '8 eggs'],
-          instructions: [{ name: null, text: 'Fill and wrap.' }],
-          image_url: null,
-          author: null,
-          published_at: null,
-        },
+        recipes: [
+          {
+            title: 'Breakfast Burritos',
+            total_minutes: 40,
+            active_minutes: 30,
+            servings: 6,
+            ingredients: ['6 tortillas', '8 eggs'],
+            instructions: [{ name: null, text: 'Fill and wrap.' }],
+            image_url: null,
+            author: null,
+            published_at: null,
+          },
+        ],
       },
     ]);
     const sourceUrl = 'https://reddit.com/r/MealPrepSunday/comments/example';
     const publishedAt = new Date('2026-07-26T10:00:00Z');
 
-    const draft = await extractRecipeFromPost(fake.client, {
+    const drafts = await extractRecipesFromPost(fake.client, {
       post: {
         sourceUrl,
         title: 'Breakfast burritos for the week',
@@ -193,7 +195,8 @@ describe('Phase 2 recipe tasks', () => {
       ],
     });
 
-    expect(draft).toMatchObject({
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]).toMatchObject({
       sourceUrl,
       author: 'meal_prepper',
       publishedAt,
@@ -213,7 +216,76 @@ describe('Phase 2 recipe tasks', () => {
       'Medium score',
     ]);
   });
+
+  it('returns one draft per recipe in a roundup post, in order', async () => {
+    const fake = fakeClient([
+      {
+        found: true,
+        reason: 'Three dishes, each with its own ingredient list.',
+        recipes: [
+          postRecipe('Gochujang coconut chicken thighs'),
+          postRecipe('Hainanese chicken and rice'),
+          postRecipe('Chia rosé herbal tea'),
+        ],
+      },
+    ]);
+
+    const drafts = await extractRecipesFromPost(fake.client, {
+      post: {
+        sourceUrl: 'https://reddit.com/r/MealPrepSunday/comments/week8',
+        title: 'meal prep challenge week 8',
+        body: 'Five recipes below.',
+        publishedAt: new Date('2026-08-02T10:00:00Z'),
+      },
+      comments: [],
+    });
+
+    expect(drafts.map((draft) => draft.title)).toEqual([
+      'Gochujang coconut chicken thighs',
+      'Hainanese chicken and rice',
+      'Chia rosé herbal tea',
+    ]);
+    // Distinct content, so distinct dedupe keys — the routing layer is what
+    // then gives each one a distinct source URL.
+    expect(new Set(drafts.map((draft) => draft.contentHash)).size).toBe(3);
+    expect(fake.calls[0]?.task.systemPrompt).toBe(EXTRACT_POST_SYSTEM_PROMPT);
+  });
+
+  it('returns nothing for a validated no-recipe post result', async () => {
+    const fake = fakeClient([
+      {
+        found: false,
+        reason: 'A photo and a question, with no quantities.',
+        recipes: [],
+      },
+    ]);
+
+    await expect(
+      extractRecipesFromPost(fake.client, {
+        post: {
+          sourceUrl: 'https://reddit.com/r/MealPrepSunday/comments/photo',
+          title: 'This weeks prep',
+          body: 'Looks good right?',
+        },
+        comments: [],
+      }),
+    ).resolves.toEqual([]);
+  });
 });
+
+function postRecipe(title: string): Record<string, unknown> {
+  return {
+    title,
+    total_minutes: null,
+    active_minutes: null,
+    servings: 4,
+    ingredients: [`1 portion of ${title}`],
+    instructions: [{ name: null, text: `Make the ${title}.` }],
+    image_url: null,
+    author: null,
+    published_at: null,
+  };
+}
 
 interface FakeCall {
   readonly task: StructuredOutputTask<unknown>;

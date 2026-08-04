@@ -269,7 +269,10 @@ export function createRedditScanOrchestrator(
             noRecipeCount += 1;
             continue;
           }
-          found += 1;
+          // `found` counts recipes, not posts: a roundup that yields five is
+          // five recipes found, and counting it as one would make the summary
+          // disagree with the rows the same loop inserts.
+          found += routed.drafts.length;
 
           const targetSourceId =
             routed.publisherSource === null
@@ -281,31 +284,33 @@ export function createRedditScanOrchestrator(
             );
           }
 
-          const ingredients = await dependencies.normalizeIngredients(
-            routed.draft.ingredients.map((ingredient) => ingredient.rawText),
-          );
-          const imageResult = await dependencies.cacheImage({
-            redditSource: source,
-            publisherSource: routed.publisherSource,
-            imageUrl: routed.draft.imageUrl,
-          });
-          const image =
-            imageResult.outcome === 'cached' ? imageResult.image : null;
-          if (imageResult.outcome === 'failed') {
-            retryRequired = true;
-            errors.push(
-              `post ${post.permalink} image: ${imageResult.error}`,
+          for (const draft of routed.drafts) {
+            const ingredients = await dependencies.normalizeIngredients(
+              draft.ingredients.map((ingredient) => ingredient.rawText),
             );
-          }
+            const imageResult = await dependencies.cacheImage({
+              redditSource: source,
+              publisherSource: routed.publisherSource,
+              imageUrl: draft.imageUrl,
+            });
+            const image =
+              imageResult.outcome === 'cached' ? imageResult.image : null;
+            if (imageResult.outcome === 'failed') {
+              errors.push(
+                `post ${post.permalink} image (${draft.slug}): ${imageResult.error}`,
+              );
+              retryRequired = true;
+            }
 
-          const persisted = await dependencies.persistRecipe({
-            sourceId: targetSourceId,
-            draft: routed.draft,
-            ingredients,
-            image,
-            seenAt: dependencies.now(),
-          });
-          if (persisted.outcome === 'inserted') newCount += 1;
+            const persisted = await dependencies.persistRecipe({
+              sourceId: targetSourceId,
+              draft,
+              ingredients,
+              image,
+              seenAt: dependencies.now(),
+            });
+            if (persisted.outcome === 'inserted') newCount += 1;
+          }
         } catch (error) {
           if (options.signal?.aborted === true) throw error;
           retryRequired = true;
